@@ -1,0 +1,61 @@
+import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { api, getToken } from '../api.js';
+
+const AuthContext = createContext(null);
+
+export function AuthProvider({ children }) {
+  const [me, setMe] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [groupId, setGroupId] = useState(() => localStorage.getItem('pp_group'));
+
+  const chooseGroup = useCallback((id) => {
+    localStorage.setItem('pp_group', id);
+    setGroupId(id);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    if (!getToken()) {
+      setMe(null);
+      setLoading(false);
+      return;
+    }
+    try {
+      const data = await api('/auth/me');
+      setMe(data);
+      const saved = localStorage.getItem('pp_group');
+      const stillMember = data.memberships.some((m) => m.group._id === saved);
+      if ((!saved || !stillMember) && data.memberships[0]) chooseGroup(data.memberships[0].group._id);
+    } catch {
+      localStorage.removeItem('pp_token');
+      setMe(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [chooseGroup]);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const login = async (token) => {
+    localStorage.setItem('pp_token', token);
+    setLoading(true);
+    await refresh();
+  };
+
+  const logout = () => {
+    localStorage.removeItem('pp_token');
+    localStorage.removeItem('pp_group');
+    setMe(null);
+    setGroupId(null);
+  };
+
+  const membership = me?.memberships.find((m) => m.group._id === groupId);
+  const role = membership?.role;
+  const value = {
+    me, loading, groupId, chooseGroup, membership, role, refresh, login, logout,
+    isFinance: role === 'admin' || role === 'treasurer',
+    canPost: ['admin', 'treasurer', 'secretary'].includes(role),
+  };
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+export const useAuth = () => useContext(AuthContext);
