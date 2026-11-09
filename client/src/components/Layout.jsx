@@ -1,8 +1,9 @@
 import { NavLink } from 'react-router-dom';
+import { UserButton } from '@clerk/react';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Layout({ children }) {
-  const { me, groupId, chooseGroup, membership, isFinance, logout } = useAuth();
+  const { me, groupId, chooseGroup, membership, isFinance } = useAuth();
 
   return (
     <div className="shell">
@@ -21,7 +22,7 @@ export default function Layout({ children }) {
         </div>
         <div className="who">
           <span className="muted">{me.user.name} · {membership?.role}</span>
-          <button className="link" onClick={logout}>Sign out</button>
+          <UserButton />
         </div>
       </header>
 

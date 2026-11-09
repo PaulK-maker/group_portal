@@ -4,6 +4,7 @@ dotenv.config({ path: fileURLToPath(new URL('./.env', import.meta.url)) });
 import express from 'express';
 import cors from 'cors';
 import { connectDB } from './config/db.js';
+import { clerkAuth } from './middleware/auth.js';
 
 import authRoutes from './routes/auth.js';
 import groupRoutes from './routes/groups.js';
@@ -19,7 +20,8 @@ const app = express();
 if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY) || process.env.TRUST_PROXY);
 app.use(cors({ origin: process.env.CLIENT_ORIGIN || true }));
 app.use(express.json({ limit: '2mb' }));
-app.use(express.urlencoded({ extended: true, limit: '5mb' })); // Mailgun posts form data
+app.use(express.urlencoded({ extended: true, limit: '5mb' }));
+app.use(clerkAuth);
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 

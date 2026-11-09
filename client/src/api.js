@@ -1,9 +1,11 @@
+import { getToken as getClerkToken } from '@clerk/react';
+
 const BASE = '/api';
 
-export const getToken = () => localStorage.getItem('pp_token');
+export const getToken = getClerkToken;
 
 export async function api(path, { method = 'GET', body, raw } = {}) {
-  const token = getToken();
+  const token = await getClerkToken();
   const res = await fetch(BASE + path, {
     method,
     headers: {
