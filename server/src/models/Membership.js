@@ -1,14 +1,14 @@
 import mongoose from 'mongoose';
 
-export const ROLES = ['admin', 'treasurer', 'secretary', 'member'];
+export const ROLES = ['admin', 'chairman', 'treasurer', 'secretary', 'member'];
 export const FINANCE_ROLES = ['admin', 'treasurer'];
-export const BOARD_ROLES = ['admin', 'treasurer', 'secretary'];
+export const BOARD_ROLES = ['admin', 'chairman', 'treasurer', 'secretary'];
 
 // How a member shows up in payment emails. Stored normalized (lowercase,
 // letters/digits only) so "J. Mwangi" and "j mwangi" match the same alias.
 const identitySchema = new mongoose.Schema(
   {
-    type: { type: String, enum: ['cashapp', 'zelle', 'pushpay', 'email', 'phone', 'name'], default: 'name' },
+    type: { type: String, enum: ['cashapp', 'venmo', 'zelle', 'pushpay', 'email', 'phone', 'name'], default: 'name' },
     value: { type: String, required: true },
   },
   { _id: false }
@@ -21,6 +21,7 @@ const membershipSchema = new mongoose.Schema(
     role: { type: String, enum: ROLES, default: 'member' },
     status: { type: String, enum: ['active', 'inactive'], default: 'active' },
     pledgeCents: { type: Number, default: 0, min: 0 }, // target for progress bar
+    remindersOff: { type: Boolean, default: false }, // member opted out of payment reminders
     paymentIdentities: { type: [identitySchema], default: [] },
   },
   { timestamps: true }

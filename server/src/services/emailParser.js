@@ -1,9 +1,10 @@
-// Turns a Cash App / Zelle / Pushpay notification email into a structured
+// Turns a Cash App / Venmo / Zelle / Pushpay notification email into a structured
 // payment. These are heuristics: collect a few of your real receipt emails
 // and add them to emailParser.test.js, then tune the patterns.
 
 const METHOD_HINTS = [
   ['cashapp', /cash\s?app|square\.com|\$cashtag/i],
+  ['venmo', /venmo/i],
   ['zelle', /zelle/i],
   ['pushpay', /pushpay/i],
 ];
@@ -11,13 +12,13 @@ const METHOD_HINTS = [
 const AMOUNT = /\$\s?([\d,]+(?:\.\d{1,2})?)/;
 
 const PAYER_PATTERNS = [
-  /^(?:(?:fwd?|re):\s*)*(.+?)\s+sent you(?:\s+money|\s+a payment|\s+\$)/im,
+  /^(?:(?:fwd?|re):\s*)*(.+?)\s+(?:sent|paid) you(?:\s+money|\s+a payment|\s+\$)/im,
   /you(?:'ve| have)? received\s+(?:\$[\d,]+(?:\.\d{2})?\s+)?(?:money\s+)?from\s+([^\n.,$]+?)(?:\s+(?:on|via|for|with)\b|[.\n,]|$)/im,
   /payment from\s+([^\n.,$]+?)(?:\s+(?:on|via|for)\b|[.\n,]|$)/im,
 ];
 
 const MEMO_PATTERNS = [
-  /sent you \$[\d,]+(?:\.\d{2})?\s+for\s+(.+)$/im,
+  /(?:sent|paid) you \$[\d,]+(?:\.\d{2})?\s+for\s+(.+)$/im,
   /^\s*(?:memo|note|message|for)\s*:\s*(.+)$/im,
 ];
 
@@ -43,7 +44,7 @@ function cleanName(name) {
   if (!name) return null;
   const n = name.replace(/[*_"“”]/g, '').replace(/\s+/g, ' ').trim();
   // Guard against grabbing a sentence instead of a name
-  if (n.length > 60 || /\b(you|your|cash app|zelle|bank)\b/i.test(n)) return null;
+  if (n.length > 60 || /\b(you|your|cash app|venmo|zelle|bank)\b/i.test(n)) return null;
   return n;
 }
 

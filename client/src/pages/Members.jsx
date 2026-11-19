@@ -88,7 +88,7 @@ export default function Members() {
             {role === 'admin' && (
               <label>Role
                 <select value={editing.role} onChange={(e) => setEditing({ ...editing, role: e.target.value })}>
-                  {['member', 'treasurer', 'secretary', 'admin'].map((r) => <option key={r}>{r}</option>)}
+                  {['member', 'chairman', 'treasurer', 'secretary', 'admin'].map((r) => <option key={r}>{r}</option>)}
                 </select>
               </label>
             )}
@@ -98,7 +98,7 @@ export default function Members() {
               </select>
             </label>
           </div>
-          <label>Names they pay under (comma separated: $cashtag, Zelle name, spouse's name)
+          <label>Names they pay under (comma separated: $cashtag, Venmo username, Zelle name, spouse's name)
             <input value={editing.aliases} onChange={(e) => setEditing({ ...editing, aliases: e.target.value })} />
           </label>
           <div className="actions">
@@ -119,7 +119,7 @@ export default function Members() {
             {role === 'admin' && (
               <label>Role
                 <select value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                  {['member', 'treasurer', 'secretary', 'admin'].map((r) => <option key={r}>{r}</option>)}
+                  {['member', 'chairman', 'treasurer', 'secretary', 'admin'].map((r) => <option key={r}>{r}</option>)}
                 </select>
               </label>
             )}

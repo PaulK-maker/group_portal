@@ -1,7 +1,7 @@
 # Clerk Integration Setup
 
 ## Overview
-PayPortal now uses Clerk for authentication, providing a secure and scalable identity solution with built-in support for email and phone-based sign-in, multi-factor authentication, and user management.
+Pamo-Ledger uses Clerk for authentication, providing a secure and scalable identity solution with built-in support for email and phone-based sign-in, multi-factor authentication, and user management.
 
 ## Environment Variables
 
@@ -10,10 +10,10 @@ PayPortal now uses Clerk for authentication, providing a secure and scalable ide
 VITE_CLERK_PUBLISHABLE_KEY=<your_clerk_publishable_key>
 ```
 
-### Server (.env)
+### Server (server/src/.env)
 ```env
 CLERK_SECRET_KEY=<your_clerk_secret_key>
-VITE_CLERK_PUBLISHABLE_KEY=<your_clerk_publishable_key>
+CLERK_PUBLISHABLE_KEY=<your_clerk_publishable_key>
 ```
 
 ## Setup Steps
@@ -53,7 +53,7 @@ VITE_CLERK_PUBLISHABLE_KEY=<your_clerk_publishable_key>
 6. On app load, `/api/auth/me` endpoint is called to sync user data with database
 
 ### Server-Side
-1. ClerkExpressWithAuth middleware validates Clerk tokens
+1. `clerkMiddleware()` validates Clerk tokens
 2. User is looked up by `clerkId` in MongoDB
 3. If user doesn't exist, new user is created
 4. User memberships and group access are retrieved
@@ -92,9 +92,10 @@ The old authentication system (email/phone codes) has been replaced with Clerk. 
 - Check that it starts with `pk_`
 
 ### "Unauthorized" errors from server
-- Verify `CLERK_SECRET_KEY` is set in server/.env
+- Verify `CLERK_SECRET_KEY` and `CLERK_PUBLISHABLE_KEY` in server/src/.env belong to the same Clerk application as the client key
 - Ensure Clerk middleware is applied to Express app
 - Check that token is being sent from client in Authorization header
+- If the account screen shows an error after sign-in, retry or sign out and sign in again; check the server logs if it persists
 
 ### User not found after sign-in
 - First sign-in creates a new user record

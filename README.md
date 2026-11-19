@@ -1,12 +1,12 @@
-# PayPortal
+# Pamo-Ledger
 
 Treasurer and member portal for small groups: a church men's group today, any club, chama or association later.
 
-- **Ledger**: payments via Cash App, Zelle, Pushpay, cash or check, with each member's progress against a pledge
+- **Ledger**: payments via Cash App, Venmo, Zelle, Pushpay, cash or check, with each member's progress against a pledge
 - **Auto-capture**: forwarded payment emails become *pending* entries; the treasurer confirms each one
 - **Members**: add and edit members, roles, and the names they pay under
-- **Board**: announcements, meeting minutes, events
-- **Excel export**: Summary sheet + full Ledger sheet
+- **Official**: announcements, meeting minutes and events, attributed to the sender's assigned role
+- **Excel export**: Summary and full Ledger sheets, plus a monthly report for the selected payment category
 
 MERN: MongoDB, Express, React (Vite), Node 18+.
 
@@ -17,7 +17,7 @@ MERN: MongoDB, Express, React (Vite), Node 18+.
 ```bash
 # 1. API
 cd server
-cp .env.example .env        # set MONGO_URI (local Mongo or a free Atlas cluster) and JWT_SECRET
+cp .env.example .env        # set MONGO_URI (local Mongo or a free Atlas cluster) and your Clerk keys (see CLERK_SETUP.md)
 npm install
 npm run dev                 # http://localhost:4000
 npm test                    # email parser + matcher tests
@@ -28,7 +28,7 @@ npm install
 npm run dev                 # http://localhost:5173 (proxies /api to :4000)
 ```
 
-Sign in with an email **or a phone number**. **In development the 6-digit code prints in the server terminal** (email and SMS both). Phone numbers are stored in international format (`+15551234567`); numbers without a `+` use `DEFAULT_COUNTRY_CODE` (default `1`). The first person creates the organization and group and becomes admin. Then add the other members on the Members page, with an email, a phone number, or both.
+Sign in with an email or a phone number through [Clerk](https://clerk.com). Sign-in codes, rate limits, and session handling are all handled by Clerk. The first person creates the organization and group and becomes admin. Then add the other members on the Members page, with an email, a phone number, or both.
 
 ---
 
@@ -47,6 +47,7 @@ User  (one person, can belong to many groups)
 
 - **Every record carries `group`.** The `loadMembership` middleware checks that the signed-in user is an active member of `:groupId` before any group route runs. That is the tenant wall.
 - **Roles are per group.** Someone can be treasurer of the men's group and a plain member of another.
+- Admins can assign chairman, treasurer and secretary roles. These officials and admins can post announcements and events; their role at the time of posting is displayed with their name. Chairman does not grant finance or admin access.
 - **Nothing is church-specific in the code.** Organization type, categories (Dues, Event, Welfare…) and the label for "contribution" are settings.
 - **Next steps toward SaaS:** an org-level admin who manages several groups, billing per organization, and a custom subdomain per org.
 
@@ -58,23 +59,24 @@ User  (one person, can belong to many groups)
 server/src/
   index.js                  app setup + route mounting
   config/db.js              Mongo connection
-  middleware/auth.js        requireAuth (JWT), loadMembership (tenant guard), requireRole
+  middleware/auth.js        clerkAuth + requireAuth (Clerk session), loadMembership (tenant guard), requireRole
   models/                   Organization, Group, User, Membership, Contribution,
                             PendingPayment, Post, Event
   routes/
-    auth.js                 email code sign-in, /me
+    auth.js                 Clerk session sync, /me
     groups.js               create org+group, group info, settings
     members.js              list/add/edit members, my progress
     contributions.js        ledger, summary, manual entry, void
-    pending.js              review queue: confirm / dismiss
+    pending.js              review queue: confirm / dismiss, view member screenshots
+    proofs.js               member payment screenshot uploads -> review queue
+    reminders.js            treasurer email blasts, member reminder opt-out, send history
     inbound.js              webhook that receives forwarded payment emails
     board.js                posts (announcements/minutes) + events
     export.js               Excel workbook download
   services/
-    emailParser.js          Cash App / Zelle / Pushpay email -> {amount, payer, memo, ref}
+    emailParser.js          Cash App / Venmo / Zelle / Pushpay email -> {amount, payer, memo, ref}
     matcher.js              payer name -> member (exact, alias, initial+last name)
     totals.js               per-member totals aggregation
-    mailer.js               sends login codes (console in dev)
     emailParser.test.js
 
 client/src/
@@ -89,7 +91,7 @@ client/src/
 ## Payment flow
 
 ```
-Member pays (Cash App / Zelle / Pushpay)
+Member pays (Cash App / Venmo / Zelle / Pushpay)
       │
       ▼
 Receipt email → group's Gmail inbox → forwarding rule
@@ -110,19 +112,19 @@ Contribution (source: email)  →  progress bars, totals, Excel export
 Manual entry goes straight to Contribution (source: manual). Money records are never deleted, only **voided with a reason**, so the audit trail stays intact.
 
 ### Setting up email capture
-1. Make a dedicated Gmail account for the group. Point the group's Cash App and bank (Zelle) notifications to it, or forward them there.
+1. Make a dedicated Gmail account for the group. Point the group's Cash App, Venmo and bank (Zelle) notifications to it, or forward them there.
 2. Create an inbound route with an email service, e.g. Mailgun Routes: match the address → forward to `https://YOUR-API/api/inbound/email/<inboundToken>`.
    The token is returned by `GET /api/groups/:groupId` for admins and treasurers. Treat it like a password.
-3. In Gmail, add a filter that forwards Cash App and Zelle emails to the Mailgun address.
+3. In Gmail, add a filter that forwards Cash App, Venmo and Zelle emails to the Mailgun address.
 4. Send yourself a $1 test payment and check the Pending tab.
 5. Paste a few of your real receipt emails (personal details removed) into `emailParser.test.js` and tune the patterns. Each bank words Zelle alerts a bit differently.
 
 ---
 
 ## Before going live (to-do)
-- [ ] Send login codes with a real email provider (`services/mailer.js`) and a real SMS provider (`sendLoginSms`)
+- [ ] Move Clerk from development to a production instance and use the production keys (see `CLERK_SETUP.md`)
 - [ ] Verify the inbound provider's webhook signature (`routes/inbound.js`)
-- [x] Rate-limit sign-in codes (per IP, per email/phone, country allowlist). Still to do: set a daily spend cap in your SMS provider's dashboard, and move the per-identity limits to Redis/Mongo if you run more than one API instance.
+- [ ] Review sign-in rate limits in the Clerk dashboard, and set a daily spend cap in any SMS provider connected to Clerk
 - [ ] File uploads for minutes PDFs (S3 or Cloudinary); for now posts take a link
 - [ ] CSV import from Cash App and bank statements for monthly reconciliation
 - [ ] WhatsApp or SMS notifications ("payment received", "minutes posted")

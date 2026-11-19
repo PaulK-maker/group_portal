@@ -38,6 +38,18 @@ test('Zelle "received from" wording', () => {
   assert.equal(p.payerName, 'Peter Otieno');
 });
 
+test('Venmo: name, amount and memo from subject', () => {
+  const p = parsePaymentEmail({
+    from: 'Venmo <venmo@venmo.com>',
+    subject: 'Mary Wanjiru paid you $40.00 for Men\'s retreat',
+    text: 'Payment ID: 4123456789',
+  });
+  assert.equal(p.method, 'venmo');
+  assert.equal(p.amountCents, 4000);
+  assert.equal(p.payerName, 'Mary Wanjiru');
+  assert.equal(p.memo, "Men's retreat");
+});
+
 test('ignores outgoing payments and non-payment emails', () => {
   assert.equal(parsePaymentEmail({ from: 'cash@square.com', subject: 'You sent $20 to Mary' }), null);
   assert.equal(parsePaymentEmail({ from: 'cash@square.com', subject: 'Your monthly statement is ready' }), null);

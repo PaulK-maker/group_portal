@@ -9,7 +9,7 @@ export default function Layout({ children }) {
     <div className="shell">
       <header className="topbar">
         <div className="brand">
-          <strong>PayPortal</strong>
+          <strong>Pamo-Ledger</strong>
           {me.memberships.length > 1 ? (
             <select value={groupId || ''} onChange={(e) => chooseGroup(e.target.value)}>
               {me.memberships.map((m) => (
@@ -28,10 +28,11 @@ export default function Layout({ children }) {
 
       <nav className="tabs">
         <NavLink to="/" end>Home</NavLink>
-        <NavLink to="/board">Board</NavLink>
+        <NavLink to="/board">Official</NavLink>
         <NavLink to="/members">Members</NavLink>
         <NavLink to="/ledger">{isFinance ? 'Ledger' : 'My payments'}</NavLink>
         {isFinance && <NavLink to="/pending">Pending</NavLink>}
+        {isFinance && <NavLink to="/reminders">Reminders</NavLink>}
       </nav>
 
       {/* key forces pages to reload their data when switching groups */}

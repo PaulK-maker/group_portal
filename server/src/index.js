@@ -11,6 +11,8 @@ import groupRoutes from './routes/groups.js';
 import memberRoutes from './routes/members.js';
 import contributionRoutes from './routes/contributions.js';
 import pendingRoutes from './routes/pending.js';
+import proofRoutes from './routes/proofs.js';
+import reminderRoutes from './routes/reminders.js';
 import boardRoutes from './routes/board.js';
 import exportRoutes from './routes/export.js';
 import inboundRoutes from './routes/inbound.js';
@@ -34,6 +36,8 @@ app.use('/api/groups', groupRoutes);
 app.use('/api/groups/:groupId/members', memberRoutes);
 app.use('/api/groups/:groupId/contributions', contributionRoutes);
 app.use('/api/groups/:groupId/pending', pendingRoutes);
+app.use('/api/groups/:groupId/payment-proofs', proofRoutes);
+app.use('/api/groups/:groupId/reminders', reminderRoutes);
 app.use('/api/groups/:groupId/board', boardRoutes);
 app.use('/api/groups/:groupId/export', exportRoutes);
 
@@ -45,5 +49,5 @@ app.use((err, req, res, next) => {
 
 const port = process.env.PORT || 4000;
 connectDB(process.env.MONGO_URI).then(() => {
-  app.listen(port, () => console.log(`PayPortal API on :${port}`));
+  app.listen(port, () => console.log(`Pamo-Ledger API on :${port}`));
 });

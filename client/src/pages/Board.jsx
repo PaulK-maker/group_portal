@@ -3,7 +3,7 @@ import { api, fmtDate } from '../api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 
 export default function Board() {
-  const { groupId, canPost } = useAuth();
+  const { groupId, canPost, me, role } = useAuth();
   const [data, setData] = useState({ posts: [], events: [] });
   const [filter, setFilter] = useState('all');
   const [post, setPost] = useState({ type: 'announcement', title: '', body: '', attachmentUrl: '', pinned: false });
@@ -47,7 +47,7 @@ export default function Board() {
               <h3>{p.pinned && '📌 '}{p.title} <span className="tag">{p.type}</span></h3>
               {canPost && <button className="link" onClick={() => remove(`posts/${p._id}`)}>Delete</button>}
             </div>
-            <div className="small muted">{p.author?.name} · {fmtDate(p.createdAt)}</div>
+            <div className="small muted">{[p.author?.name, p.senderRole, fmtDate(p.createdAt)].filter(Boolean).join(' · ')}</div>
             {p.body && <p className="body">{p.body}</p>}
             {p.attachmentUrl && <a href={p.attachmentUrl} target="_blank" rel="noreferrer">Open attachment</a>}
           </article>
@@ -60,7 +60,11 @@ export default function Board() {
         <ul className="list">
           {data.events.map((e) => (
             <li key={e._id}>
-              <span><strong>{e.title}</strong>{e.location && ` · ${e.location}`}{e.description && <div className="small muted">{e.description}</div>}</span>
+              <span>
+                <strong>{e.title}</strong>{e.location && ` · ${e.location}`}
+                {(e.createdBy?.name || e.senderRole) && <div className="small muted">{[e.createdBy?.name, e.senderRole].filter(Boolean).join(' · ')}</div>}
+                {e.description && <div className="small muted">{e.description}</div>}
+              </span>
               <span>{new Date(e.startsAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
                 {canPost && <button className="link" onClick={() => remove(`events/${e._id}`)}> ✕</button>}
               </span>
@@ -74,6 +78,7 @@ export default function Board() {
         <div className="grid">
           <form className="card" onSubmit={submit('posts', post, () => setPost({ ...post, title: '', body: '', attachmentUrl: '', pinned: false }))}>
             <h2>New post</h2>
+            <p className="small muted">Posting as {me.user.name} · {role}</p>
             <label>Type
               <select value={post.type} onChange={(e) => setPost({ ...post, type: e.target.value })}>
                 <option value="announcement">Announcement</option>
@@ -89,6 +94,7 @@ export default function Board() {
 
           <form className="card" onSubmit={submit('events', event, () => setEvent({ title: '', startsAt: '', location: '', description: '' }))}>
             <h2>New event</h2>
+            <p className="small muted">Posting as {me.user.name} · {role}</p>
             <label>Title<input required value={event.title} onChange={(e) => setEvent({ ...event, title: e.target.value })} /></label>
             <label>Date & time<input required type="datetime-local" value={event.startsAt} onChange={(e) => setEvent({ ...event, startsAt: e.target.value })} /></label>
             <label>Location<input value={event.location} onChange={(e) => setEvent({ ...event, location: e.target.value })} /></label>

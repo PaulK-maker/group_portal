@@ -1,6 +1,6 @@
 # Twilio SMS Integration Setup
 
-PayPortal now supports **SMS-based authentication** via Twilio. Members can sign in with a phone number and receive a 6-digit code via text message.
+Pamo-Ledger supports **SMS-based authentication** via Twilio. Members can sign in with a phone number and receive a 6-digit code via text message.
 
 ## ✅ What's Included
 
@@ -70,7 +70,7 @@ Perfect for testing—no cost, no SMS sent.
 
 1. Member enters phone number on login page
 2. Server calls `sendLoginSms(phone, code)`
-3. Twilio sends SMS: *"Your PayPortal login code is: 123456"*
+3. Twilio sends SMS: *"Your Pamo-Ledger login code is: 123456"*
 4. Member enters code on next screen
 5. Server verifies & issues JWT
 
@@ -168,4 +168,4 @@ Email sign-in currently logs to console. To send real emails:
 - [Twilio SMS Docs](https://www.twilio.com/docs/sms)
 - [Twilio Console](https://www.twilio.com/console)
 - [E.164 Phone Format](https://en.wikipedia.org/wiki/E.164)
-- [PayPortal Auth Flow](../README.md#payment-flow)
+- [Pamo-Ledger Auth Flow](../README.md#payment-flow)

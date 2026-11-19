@@ -7,13 +7,24 @@ import Dashboard from './pages/Dashboard.jsx';
 import Members from './pages/Members.jsx';
 import Ledger from './pages/Ledger.jsx';
 import Pending from './pages/Pending.jsx';
+import Reminders from './pages/Reminders.jsx';
 import Board from './pages/Board.jsx';
 
 export default function App() {
-  const { me, loading, isFinance } = useAuth();
+  const { me, loading, error, isSignedIn, refresh, logout, isFinance } = useAuth();
 
   if (loading) return <div className="center muted">Loading…</div>;
-  if (!me) return <Login />;
+  if (!isSignedIn) return <Login />;
+  if (error || !me) return (
+    <div className="center">
+      <div className="card narrow">
+        <h1>Unable to load your account</h1>
+        <p className="error">{error || 'Please try again.'}</p>
+        <button type="button" onClick={refresh}>Retry</button>
+        <button type="button" className="link" onClick={logout}>Sign out</button>
+      </div>
+    </div>
+  );
   if (!me.memberships.length) return <Setup />;
 
   return (
@@ -23,6 +34,7 @@ export default function App() {
         <Route path="/members" element={<Members />} />
         <Route path="/ledger" element={<Ledger />} />
         <Route path="/pending" element={isFinance ? <Pending /> : <Navigate to="/" />} />
+        <Route path="/reminders" element={isFinance ? <Reminders /> : <Navigate to="/" />} />
         <Route path="/board" element={<Board />} />
         <Route path="/new-group" element={<Setup />} />
         <Route path="*" element={<Navigate to="/" />} />

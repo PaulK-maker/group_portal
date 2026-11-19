@@ -2,14 +2,14 @@ import { Router } from 'express';
 import User from '../models/User.js';
 import Membership, { FINANCE_ROLES, ROLES } from '../models/Membership.js';
 import Contribution from '../models/Contribution.js';
-import { requireAuth, loadMembership, requireRole, isFinance, canSeeAll } from '../middleware/auth.js';
+import { requireAuth, loadUser, loadMembership, requireRole, isFinance, canSeeAll } from '../middleware/auth.js';
 import { totalsByMembership } from '../services/totals.js';
 import { norm } from '../services/matcher.js';
 import { normalizePhone } from '../utils/phone.js';
 import { ah, httpError } from '../utils/asyncHandler.js';
 
 const router = Router({ mergeParams: true });
-router.use(requireAuth, loadMembership);
+router.use(requireAuth, loadUser, loadMembership);
 
 router.get('/', ah(async (req, res) => {
   const ms = await Membership.find({ group: req.group._id }).populate('user', 'name email phone');
@@ -35,7 +35,7 @@ router.get('/me', ah(async (req, res) => {
   const m = req.membership;
   const contributions = await Contribution.find({ membership: m._id, voided: false }).sort({ date: -1 });
   const totalCents = contributions.reduce((s, c) => s + c.amountCents, 0);
-  res.json({ membershipId: m._id, role: m.role, pledgeCents: m.pledgeCents, totalCents, contributions });
+  res.json({ membershipId: m._id, role: m.role, pledgeCents: m.pledgeCents, totalCents, contributions, remindersOff: m.remindersOff });
 }));
 
 router.post('/', requireRole(...FINANCE_ROLES), ah(async (req, res) => {

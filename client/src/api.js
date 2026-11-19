@@ -4,8 +4,8 @@ const BASE = '/api';
 
 export const getToken = getClerkToken;
 
-export async function api(path, { method = 'GET', body, raw } = {}) {
-  const token = await getClerkToken();
+export async function api(path, { method = 'GET', body, raw, token: providedToken } = {}) {
+  const token = providedToken === undefined ? await getClerkToken() : providedToken;
   const res = await fetch(BASE + path, {
     method,
     headers: {
@@ -31,5 +31,5 @@ export const toCents = (v) => Math.round(parseFloat(v || 0) * 100);
 export const fmtDate = (d) => (d ? new Date(d).toLocaleDateString() : '');
 
 export const METHOD_LABELS = {
-  cashapp: 'Cash App', zelle: 'Zelle', pushpay: 'Pushpay', cash: 'Cash', check: 'Check', other: 'Other',
+  cashapp: 'Cash App', venmo: 'Venmo', zelle: 'Zelle', pushpay: 'Pushpay', cash: 'Cash', check: 'Check', other: 'Other',
 };

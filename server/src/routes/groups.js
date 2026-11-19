@@ -2,11 +2,11 @@ import { Router } from 'express';
 import Organization from '../models/Organization.js';
 import Group from '../models/Group.js';
 import Membership from '../models/Membership.js';
-import { requireAuth, loadMembership, requireRole, isFinance } from '../middleware/auth.js';
+import { requireAuth, loadUser, loadMembership, requireRole, isFinance } from '../middleware/auth.js';
 import { ah } from '../utils/asyncHandler.js';
 
 const router = Router();
-router.use(requireAuth);
+router.use(requireAuth, loadUser);
 
 // Create an organization + its first group; the creator becomes admin.
 // Later: "add a group to an existing organization" for multi-group churches.

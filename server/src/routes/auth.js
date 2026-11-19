@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { getAuth } from '@clerk/express';
 import User from '../models/User.js';
 import Membership from '../models/Membership.js';
 import { requireAuth } from '../middleware/auth.js';
@@ -7,15 +8,16 @@ import { ah } from '../utils/asyncHandler.js';
 const router = Router();
 
 router.get('/me', requireAuth, ah(async (req, res) => {
-  const clerkUserId = req.auth.userId;
+  const auth = getAuth(req);
+  const clerkUserId = auth.userId;
   let user = await User.findOne({ clerkId: clerkUserId });
-  
+
   if (!user) {
     user = new User({
       clerkId: clerkUserId,
-      email: req.auth.sessionClaims?.email || '',
-      name: req.auth.sessionClaims?.name || 'User',
-      phone: req.auth.sessionClaims?.phone || '',
+      email: auth.sessionClaims?.email || '',
+      name: auth.sessionClaims?.name || 'User',
+      phone: auth.sessionClaims?.phone || '',
     });
     await user.save();
   }

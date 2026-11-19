@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, money, fmtDate, METHOD_LABELS } from '../api.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import ProofImage from '../components/ProofImage.jsx';
 
-// Payments picked up from forwarded Cash App / Zelle emails.
+// Payments from forwarded emails and member screenshots.
 // Nothing counts toward anyone's total until the treasurer confirms it here.
 export default function Pending() {
   const { groupId, membership } = useAuth();
@@ -43,7 +44,7 @@ export default function Pending() {
       {error && <p className="error">{error}</p>}
       <section className="card">
         <h2>Waiting for review ({items.length})</h2>
-        {!items.length && <p className="muted">All caught up. New payment emails will show up here.</p>}
+        {!items.length && <p className="muted">All caught up. New payment emails and screenshots will show up here.</p>}
         {items.map((p) => (
           <div key={p._id} className="pending">
             <div className="pending-head">
@@ -58,7 +59,7 @@ export default function Pending() {
                 <div>From: <strong>{p.parsed.payerName || 'unknown'}</strong></div>
                 {p.parsed.memo && <div className="small">“{p.parsed.memo}”</div>}
                 {p.suggestedMembership
-                  ? <span className="tag ok">matched {p.suggestedMembership.user?.name}</span>
+                  ? <span className="tag ok">{p.source === 'upload' ? 'sent by' : 'matched'} {p.suggestedMembership.user?.name}</span>
                   : <span className="tag warn">no match, pick a member</span>}
               </div>
             </div>
@@ -79,7 +80,9 @@ export default function Pending() {
                 Remember “{p.parsed.payerName}” for this member
               </label>
             </div>
-            <details className="small muted"><summary>Original email</summary><pre>{p.raw?.subject}{'\n'}{p.raw?.snippet}</pre></details>
+            {p.proofType && <ProofImage path={`${g}/pending/${p._id}/proof`} />}
+            <details className="small muted"><summary>Original email</summary>
+<pre>{p.raw?.subject}{'\n'}{p.raw?.snippet}</pre></details>
             <div className="actions">
               <button disabled={!choice[p._id]?.membershipId} onClick={() => confirm(p)}>Confirm</button>
               <button className="secondary" onClick={() => dismiss(p)}>Dismiss</button>

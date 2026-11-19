@@ -1,12 +1,12 @@
 import { Router } from 'express';
 import Contribution, { METHODS } from '../models/Contribution.js';
 import Membership, { FINANCE_ROLES } from '../models/Membership.js';
-import { requireAuth, loadMembership, requireRole, canSeeAll } from '../middleware/auth.js';
+import { requireAuth, loadUser, loadMembership, requireRole, canSeeAll } from '../middleware/auth.js';
 import { totalsByMembership } from '../services/totals.js';
 import { ah, httpError } from '../utils/asyncHandler.js';
 
 const router = Router({ mergeParams: true });
-router.use(requireAuth, loadMembership);
+router.use(requireAuth, loadUser, loadMembership);
 
 router.get('/', ah(async (req, res) => {
   const { membershipId, from, to, includeVoided } = req.query;

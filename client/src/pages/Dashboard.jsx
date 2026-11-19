@@ -27,6 +27,12 @@ export default function Dashboard() {
   if (error) return <p className="error">{error}</p>;
   if (!mine) return <p className="muted">Loading…</p>;
 
+  const setReminders = (on) => {
+    api(`/groups/${groupId}/reminders/me`, { method: 'PATCH', body: { remindersOff: !on } })
+      .then(() => setMine((m) => ({ ...m, remindersOff: !on })))
+      .catch((e) => setError(e.message));
+  };
+
   return (
     <div className="grid">
       <section className="card">
@@ -38,6 +44,9 @@ export default function Dashboard() {
           ))}
           {!mine.contributions.length && <li className="muted">No payments recorded yet.</li>}
         </ul>
+        <label className="inline small">
+          <input type="checkbox" checked={!mine.remindersOff} onChange={(e) => setReminders(e.target.checked)} /> Email me payment reminders
+        </label>
       </section>
 
       <section className="card">

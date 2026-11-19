@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { BOARD_ROLES } from './Membership.js';
 
 const eventSchema = new mongoose.Schema(
   {
@@ -8,6 +9,7 @@ const eventSchema = new mongoose.Schema(
     startsAt: { type: Date, required: true },
     location: String,
     createdBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    senderRole: { type: String, enum: BOARD_ROLES },
   },
   { timestamps: true }
 );

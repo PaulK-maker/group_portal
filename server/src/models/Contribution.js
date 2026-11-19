@@ -1,6 +1,6 @@
 import mongoose from 'mongoose';
 
-export const METHODS = ['cashapp', 'zelle', 'pushpay', 'cash', 'check', 'other'];
+export const METHODS = ['cashapp', 'venmo', 'zelle', 'pushpay', 'cash', 'check', 'other'];
 
 // The ledger. Money is stored in integer cents to avoid float rounding.
 // Entries are never deleted, only voided, so there is always an audit trail.
@@ -14,7 +14,7 @@ const contributionSchema = new mongoose.Schema(
     category: { type: String, default: 'Dues' },
     reference: { type: String, trim: true }, // confirmation / transaction id
     memo: { type: String, trim: true },
-    source: { type: String, enum: ['manual', 'email', 'import'], default: 'manual' },
+    source: { type: String, enum: ['manual', 'email', 'import', 'upload'], default: 'manual' },
     pending: { type: mongoose.Schema.Types.ObjectId, ref: 'PendingPayment' },
     enteredBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     voided: { type: Boolean, default: false },

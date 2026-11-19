@@ -7,7 +7,7 @@
   "scripts": {
     "dev": "node --watch src/index.js",
     "start": "node src/index.js",
-    "test": "node --test src/services/*.test.js"
+    "test": "node --test src/services/*.test.js src/middleware/*.test.js src/routes/*.test.js"
   },
   "dependencies": {
     "@clerk/express": "^1.0.5",

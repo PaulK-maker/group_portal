@@ -2,17 +2,26 @@ import { Router } from 'express';
 import ExcelJS from 'exceljs';
 import Contribution from '../models/Contribution.js';
 import Membership, { FINANCE_ROLES } from '../models/Membership.js';
-import { requireAuth, loadMembership, requireRole } from '../middleware/auth.js';
+import { requireAuth, loadUser, loadMembership, requireRole } from '../middleware/auth.js';
 import { totalsByMembership } from '../services/totals.js';
 import { ah } from '../utils/asyncHandler.js';
 
 const router = Router({ mergeParams: true });
-router.use(requireAuth, loadMembership, requireRole(...FINANCE_ROLES));
+router.use(requireAuth, loadUser, loadMembership, requireRole(...FINANCE_ROLES));
 
 const dollars = (c) => Math.round(c) / 100;
+const methodLabels = {
+  cashapp: 'Cash App', venmo: 'Venmo', zelle: 'Zelle', pushpay: 'Pushpay', cash: 'Cash', check: 'Check', other: 'Other',
+};
 
 // Full Excel workbook: a Summary sheet (one row per member) + the Ledger.
 router.get('/', ah(async (req, res) => {
+  const categories = req.group.settings.categories;
+  const defaultCategory = categories.includes('Dues') ? 'Dues' : categories[0];
+  const category = req.query.category === undefined ? defaultCategory : req.query.category;
+  if (typeof category !== 'string' || !categories.includes(category)) {
+    return res.status(400).json({ error: 'Choose a valid report category' });
+  }
   const [members, ledger, totals] = await Promise.all([
     Membership.find({ group: req.group._id }).populate('user', 'name email phone'),
     Contribution.find({ group: req.group._id }).sort({ date: 1 }).populate({
@@ -22,7 +31,7 @@ router.get('/', ah(async (req, res) => {
   ]);
 
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'PayPortal';
+  wb.creator = 'Pamo-Ledger';
   const money = '"$"#,##0.00';
 
   const s = wb.addWorksheet('Summary');
@@ -68,7 +77,7 @@ router.get('/', ah(async (req, res) => {
       date: c.date,
       member: c.membership?.user?.name,
       amount: dollars(c.amountCents),
-      method: c.method,
+      method: methodLabels[c.method] || c.method,
       category: c.category,
       reference: c.reference,
       memo: c.memo,
@@ -78,7 +87,42 @@ router.get('/', ah(async (req, res) => {
   );
   l.getRow(1).font = { bold: true };
 
+  const monthly = wb.addWorksheet('Monthly report');
+  monthly.columns = [
+    { header: 'Month', key: 'month', width: 12 },
+    { header: 'Member', key: 'member', width: 26 },
+    { header: 'Date', key: 'date', width: 12, style: { numFmt: 'yyyy-mm-dd' } },
+    { header: 'Category', key: 'category', width: 22 },
+    { header: 'Amount', key: 'amount', width: 12, style: { numFmt: money } },
+    { header: 'Method', key: 'method', width: 12 },
+    { header: 'Reference', key: 'reference', width: 18 },
+    { header: 'Memo', key: 'memo', width: 30 },
+  ];
+  const groups = new Map();
+  for (const c of ledger) {
+    if (c.voided || c.category !== category) continue;
+    const month = c.date.toISOString().slice(0, 7);
+    const memberId = String(c.membership?._id || c._id);
+    const key = `${month}:${memberId}`;
+    if (!groups.has(key)) groups.set(key, { month, member: c.membership?.user?.name, payments: [] });
+    groups.get(key).payments.push(c);
+  }
+  for (const { month, member, payments } of groups.values()) {
+    let totalCents = 0;
+    for (const c of payments) {
+      totalCents += c.amountCents;
+      monthly.addRow({
+        month, member, date: c.date, category: c.category, amount: dollars(c.amountCents),
+        method: methodLabels[c.method] || c.method, reference: c.reference, memo: c.memo,
+      });
+    }
+    const subtotal = monthly.addRow({ month, member, category: `${category} total`, amount: dollars(totalCents) });
+    subtotal.font = { bold: true };
+  }
+  monthly.getRow(1).font = { bold: true };
+
   const safe = req.group.name.replace(/[^a-z0-9]+/gi, '-');
+  res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
   res.setHeader('Content-Disposition', `attachment; filename="${safe}-${new Date().toISOString().slice(0, 10)}.xlsx"`);
   await wb.xlsx.write(res);

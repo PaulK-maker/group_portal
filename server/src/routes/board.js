@@ -2,17 +2,17 @@ import { Router } from 'express';
 import Post from '../models/Post.js';
 import Event from '../models/Event.js';
 import { BOARD_ROLES } from '../models/Membership.js';
-import { requireAuth, loadMembership, requireRole } from '../middleware/auth.js';
+import { requireAuth, loadUser, loadMembership, requireRole } from '../middleware/auth.js';
 import { ah, httpError } from '../utils/asyncHandler.js';
 
 // Announcements, meeting minutes and upcoming events.
 const router = Router({ mergeParams: true });
-router.use(requireAuth, loadMembership);
+router.use(requireAuth, loadUser, loadMembership);
 
 router.get('/', ah(async (req, res) => {
   const [posts, events] = await Promise.all([
     Post.find({ group: req.group._id }).sort({ pinned: -1, createdAt: -1 }).limit(100).populate('author', 'name'),
-    Event.find({ group: req.group._id, startsAt: { $gte: new Date(Date.now() - 864e5) } }).sort({ startsAt: 1 }),
+    Event.find({ group: req.group._id, startsAt: { $gte: new Date(Date.now() - 864e5) } }).sort({ startsAt: 1 }).populate('createdBy', 'name'),
   ]);
   res.json({ posts, events });
 }));
@@ -25,6 +25,7 @@ router.post('/posts', requireRole(...BOARD_ROLES), ah(async (req, res) => {
     type: type === 'minutes' ? 'minutes' : 'announcement',
     title, body, attachmentUrl, pinned: Boolean(pinned),
     author: req.userId,
+    senderRole: req.membership.role,
   });
   res.status(201).json({ post });
 }));
@@ -39,6 +40,7 @@ router.post('/events', requireRole(...BOARD_ROLES), ah(async (req, res) => {
   if (!title?.trim() || !startsAt) throw httpError(400, 'Title and date are required');
   const event = await Event.create({
     group: req.group._id, title, description, location, startsAt: new Date(startsAt), createdBy: req.userId,
+    senderRole: req.membership.role,
   });
   res.status(201).json({ event });
 }));

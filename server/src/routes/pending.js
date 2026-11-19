@@ -2,12 +2,12 @@ import { Router } from 'express';
 import PendingPayment from '../models/PendingPayment.js';
 import Contribution from '../models/Contribution.js';
 import Membership, { FINANCE_ROLES } from '../models/Membership.js';
-import { requireAuth, loadMembership, requireRole } from '../middleware/auth.js';
+import { requireAuth, loadUser, loadMembership, requireRole } from '../middleware/auth.js';
 import { norm } from '../services/matcher.js';
 import { ah, httpError } from '../utils/asyncHandler.js';
 
 const router = Router({ mergeParams: true });
-router.use(requireAuth, loadMembership, requireRole(...FINANCE_ROLES));
+router.use(requireAuth, loadUser, loadMembership, requireRole(...FINANCE_ROLES));
 
 router.get('/', ah(async (req, res) => {
   const status = ['pending', 'confirmed', 'dismissed'].includes(req.query.status) ? req.query.status : 'pending';
@@ -16,6 +16,13 @@ router.get('/', ah(async (req, res) => {
     .limit(200)
     .populate({ path: 'suggestedMembership', select: 'user', populate: { path: 'user', select: 'name' } });
   res.json({ pending: rows });
+}));
+
+// Treasurer opens the screenshot a member uploaded.
+router.get('/:id/proof', ah(async (req, res) => {
+  const p = await PendingPayment.findOne({ _id: req.params.id, group: req.group._id }).select('+proofData');
+  if (!p?.proofData) throw httpError(404, 'No screenshot');
+  res.type(p.proofType).set('Cache-Control', 'private, max-age=3600').send(p.proofData);
 }));
 
 // Treasurer confirms: becomes a real ledger entry.
@@ -32,7 +39,7 @@ router.post('/:id/confirm', ah(async (req, res) => {
     membership: member._id,
     amountCents: p.parsed.amountCents,
     date: p.parsed.date || p.createdAt,
-    method: ['cashapp', 'zelle', 'pushpay'].includes(p.parsed.method) ? p.parsed.method : 'other',
+    method: ['cashapp', 'venmo', 'zelle', 'pushpay'].includes(p.parsed.method) ? p.parsed.method : 'other',
     category: req.body.category || p.parsed.category || req.group.settings.categories[0],
     reference: p.parsed.reference,
     memo: p.parsed.memo,
@@ -45,21 +52,23 @@ router.post('/:id/confirm', ah(async (req, res) => {
   if (req.body.rememberPayer && p.parsed.payerName) {
     const value = norm(p.parsed.payerName);
     if (!member.paymentIdentities.some((i) => i.value === value)) {
-      const type = ['cashapp', 'zelle', 'pushpay'].includes(p.parsed.method) ? p.parsed.method : 'name';
+      const type = ['cashapp', 'venmo', 'zelle', 'pushpay'].includes(p.parsed.method) ? p.parsed.method : 'name';
       member.paymentIdentities.push({ type, value });
       await member.save();
     }
   }
 
-  Object.assign(p, { status: 'confirmed', contribution: c._id, resolvedBy: req.userId });
+  // Screenshots are deleted once the treasurer has acted on them.
+  Object.assign(p, { status: 'confirmed', contribution: c._id, resolvedBy: req.userId, proofType: undefined, proofData: undefined });
   await p.save();
   res.json({ contribution: c });
 }));
 
 router.post('/:id/dismiss', ah(async (req, res) => {
+  // Screenshots are deleted once the treasurer has acted on them.
   const p = await PendingPayment.findOneAndUpdate(
     { _id: req.params.id, group: req.group._id, status: 'pending' },
-    { status: 'dismissed', resolvedBy: req.userId },
+    { $set: { status: 'dismissed', resolvedBy: req.userId }, $unset: { proofType: 1, proofData: 1 } },
     { new: true }
   );
   if (!p) throw httpError(404, 'Not found or already handled');

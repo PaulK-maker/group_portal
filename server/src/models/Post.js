@@ -1,4 +1,5 @@
 import mongoose from 'mongoose';
+import { BOARD_ROLES } from './Membership.js';
 
 const postSchema = new mongoose.Schema(
   {
@@ -9,6 +10,7 @@ const postSchema = new mongoose.Schema(
     attachmentUrl: String, // e.g. link to a PDF of the minutes
     pinned: { type: Boolean, default: false },
     author: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    senderRole: { type: String, enum: BOARD_ROLES },
   },
   { timestamps: true }
 );

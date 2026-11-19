@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { api, money, toCents, fmtDate, METHOD_LABELS } from '../api.js';
 import { useAuth } from '../context/AuthContext.jsx';
+import ProofUpload from '../components/ProofUpload.jsx';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -11,6 +12,9 @@ export default function Ledger() {
   const [members, setMembers] = useState([]);
   const [showVoided, setShowVoided] = useState(false);
   const [error, setError] = useState('');
+  const [exportCategory, setExportCategory] = useState(() =>
+    categories.includes('Dues') ? 'Dues' : categories[0]
+  );
   const blank = { membershipId: '', amount: '', method: 'cashapp', category: categories[0], date: today(), reference: '', memo: '' };
   const [form, setForm] = useState(blank);
   const g = `/groups/${groupId}`;
@@ -45,7 +49,7 @@ export default function Ledger() {
 
   const exportExcel = async () => {
     try {
-      const res = await api(`${g}/export`, { raw: true });
+      const res = await api(`${g}/export?category=${encodeURIComponent(exportCategory)}`, { raw: true });
       const blob = await res.blob();
       const name = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'ledger.xlsx';
       const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
@@ -89,6 +93,8 @@ export default function Ledger() {
         </form>
       )}
 
+      <ProofUpload />
+
       <section className="card">
         <div className="row-between">
           <h2>{isFinance ? 'Ledger' : 'My payments'} · {money(total)}</h2>
@@ -98,7 +104,17 @@ export default function Ledger() {
                 <input type="checkbox" checked={showVoided} onChange={(e) => setShowVoided(e.target.checked)} /> show voided
               </label>
             )}
-            {isFinance && <button className="secondary" onClick={exportExcel}>Export to Excel</button>}
+            {isFinance && (
+              <>
+                <label className="inline small">
+                  Monthly report category
+                  <select value={exportCategory} onChange={(e) => setExportCategory(e.target.value)}>
+                    {categories.map((category) => <option key={category} value={category}>{category}</option>)}
+                  </select>
+                </label>
+                <button className="secondary" onClick={exportExcel}>Export to Excel</button>
+              </>
+            )}
           </div>
         </div>
         <table>
