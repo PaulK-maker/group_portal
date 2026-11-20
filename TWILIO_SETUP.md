@@ -1,5 +1,7 @@
 # Twilio SMS Integration Setup
 
+> Historical document: this Twilio integration is no longer used. Authentication is handled by Clerk; see [CLERK_SETUP.md](CLERK_SETUP.md).
+
 Pamo-Ledger supports **SMS-based authentication** via Twilio. Members can sign in with a phone number and receive a 6-digit code via text message.
 
 ## ✅ What's Included

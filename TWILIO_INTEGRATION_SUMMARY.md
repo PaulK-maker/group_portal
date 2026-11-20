@@ -1,5 +1,7 @@
 # ✅ Twilio SMS Integration — COMPLETE
 
+> Historical document: this Twilio integration is no longer used. Authentication is handled by Clerk; see [CLERK_SETUP.md](CLERK_SETUP.md).
+
 **Commit:** `999b60b` — Add Twilio SMS integration for phone-based authentication
 
 ---
