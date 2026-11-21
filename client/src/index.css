@@ -52,9 +52,19 @@ td { padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: to
 tr.dim td, tr.voided td { color: var(--muted); }
 tr.voided td { text-decoration: line-through; }
 @media (max-width: 700px) { table { display: block; overflow-x: auto; } }
-.import-table { overflow-x: auto; }
-.import-table input[type="text"] { min-width: 90px; width: 110px; }
 .import-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
+.import-step { border-top: 1px solid var(--line); padding-top: 16px; }
+.import-step p, .import-help p { margin: 0 0 8px; }
+.import-options, .import-payment { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+.import-options summary, .import-payment summary { cursor: pointer; color: var(--accent); }
+.import-options > .stack, .import-payment-details { padding-top: 12px; }
+.import-column { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px 12px; align-items: start; border-bottom: 1px solid var(--line); padding-bottom: 8px; }
+.import-help { background: var(--accent-soft); border-radius: 10px; padding: 14px; }
+.import-help label { max-width: 420px; }
+.import-payment > label { margin-bottom: 6px; }
+.import-payment summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; }
+.import-payment summary > span { min-width: 0; overflow-wrap: anywhere; }
+.import-payment-details .form-row > label { min-width: 0; }
 
 .list { list-style: none; margin: 8px 0; padding: 0; }
 .list li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }

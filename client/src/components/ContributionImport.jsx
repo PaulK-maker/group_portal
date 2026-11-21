@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { api, money } from '../api.js';
-import { amountInCents, makeImportRows } from './contributionImportData.js';
+import {
+  amountInCents, assignMemberToGroup, dateFromCell, fillMissingDates,
+  importIssues, makeImportRows, unmatchedNameGroups,
+} from './contributionImportData.js';
 
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const monthHeaders = [
@@ -13,6 +16,7 @@ const currentDate = () => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
 const makeId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((n) => n.toString(16).padStart(2, '0')).join('');
+const headerMatches = (header, pattern) => pattern.test(String(header ?? '').trim());
 
 function readFile(file) {
   return new Promise((resolve, reject) => {
@@ -25,21 +29,26 @@ function readFile(file) {
 
 export default function ContributionImport({ groupId, members, categories, onImported }) {
   const [sheets, setSheets] = useState([]);
+  const [fileName, setFileName] = useState('');
   const [sheetIndex, setSheetIndex] = useState(0);
   const [headerRow, setHeaderRow] = useState(1);
   const [layout, setLayout] = useState('matrix');
   const [nameColumn, setNameColumn] = useState('');
   const [amountColumn, setAmountColumn] = useState('');
   const [dateColumn, setDateColumn] = useState('');
+  const [dateFormat, setDateFormat] = useState('');
   const [categoryColumn, setCategoryColumn] = useState('');
   const [memoColumn, setMemoColumn] = useState('');
   const [columns, setColumns] = useState([]);
   const [year, setYear] = useState('');
   const [defaultDate, setDefaultDate] = useState(currentDate);
   const [defaultCategory, setDefaultCategory] = useState(categories[0]);
+  const [bulkDate, setBulkDate] = useState(currentDate);
+  const [bulkCategory, setBulkCategory] = useState(categories[0]);
   const [rows, setRows] = useState(null);
   const [review, setReview] = useState(null);
   const [approved, setApproved] = useState({});
+  const [commitAttempted, setCommitAttempted] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
@@ -50,12 +59,16 @@ export default function ContributionImport({ groupId, members, categories, onImp
     if (!sheet) return;
     const row = sheet.rows[headerRow - 1] || [];
     const find = (pattern) => {
-      const index = row.findIndex((value) => pattern.test(String(value).trim()));
+      const index = row.findIndex((value) => headerMatches(value, pattern));
       return index < 0 ? '' : String(index);
     };
-    setNameColumn(find(/^(member|member name|name)$/i));
-    setAmountColumn(find(/^(amount|payment|contribution)$/i));
+    const amount = find(/^(amount|payment|contribution)$/i);
+    const hasMonths = row.some((value) => monthHeaders.some((pattern) => pattern.test(String(value).trim().toLowerCase())));
+    setLayout(amount !== '' && !hasMonths ? 'payments' : 'matrix');
+    setNameColumn(find(/^(member|member name|name|payer)$/i));
+    setAmountColumn(amount);
     setDateColumn(find(/^(date|payment date)$/i));
+    setDateFormat('');
     setCategoryColumn(find(/^category$/i));
     setMemoColumn(find(/^(memo|note|notes|event)$/i));
     setColumns(row.map((value) => {
@@ -67,8 +80,6 @@ export default function ContributionImport({ groupId, members, categories, onImp
           categories.find((category) => category.toLowerCase() === (header === 'special' ? 'other' : 'dues')) || categories[0],
       };
     }));
-    setRows(null);
-    setReview(null);
   }, [sheet, headerRow, categories]);
 
   const upload = async (event) => {
@@ -78,17 +89,22 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setError('');
     setMessage('');
     if (!file.name.toLowerCase().endsWith('.xlsx') || file.size > 750 * 1024 || !file.size) {
-      setError('Choose a non-empty .xlsx file no larger than 750 KB.');
+      setError('Choose a non-empty Excel file ending in .xlsx, no larger than 750 KB.');
       return;
     }
     setBusy(true);
     try {
       const result = await api(`/groups/${groupId}/imports/workbook`, { method: 'POST', body: { data: await readFile(file) } });
+      const ledger = result.sheets.findIndex((item) => item.name.trim().toLowerCase() === 'ledger' &&
+        item.rows[0]?.some((value) => headerMatches(value, /^(member|member name|name|payer)$/i)) &&
+        item.rows[0]?.some((value) => headerMatches(value, /^(amount|payment|contribution)$/i)));
       setSheets(result.sheets);
-      setSheetIndex(0);
+      setFileName(file.name);
+      setSheetIndex(ledger >= 0 ? ledger : 0);
       setHeaderRow(1);
       setRows(null);
       setReview(null);
+      setCommitAttempted(false);
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   };
@@ -97,52 +113,56 @@ export default function ContributionImport({ groupId, members, categories, onImp
   const columnSelect = (label, value, setter, optional = false) => (
     <label>{label}
       <select value={value} onChange={(event) => setter(event.target.value)}>
-        <option value="">{optional ? 'Not in this sheet' : 'Choose a column'}</option>
+        <option value="">{optional ? 'Not in this file' : 'Choose a column'}</option>
         {options}
       </select>
     </label>
   );
   const changeColumn = (i, update) => setColumns((previous) => previous.map((column, index) => index === i ? { ...column, ...update } : column));
-  const changeRow = (id, update) => {
-    setRows((previous) => previous.map((row) => row.id === id ? { ...row, ...update } : row));
+  const updateRows = (update) => {
+    setRows(update);
     setReview(null);
     setApproved({});
+    setError('');
   };
+  const changeRow = (id, update) => updateRows((previous) => previous.map((row) => row.id === id ? { ...row, ...update } : row));
 
   const preview = () => {
     setError('');
     setMessage('');
-    if (!sheet || nameColumn === '' || !defaultDate) return setError('Choose a member column and default date.');
+    if (!sheet || nameColumn === '' || !dateFromCell(defaultDate)) return setError('Choose the column with member names and a valid date to use when dates are missing.');
     if (layout === 'matrix') {
-      if (!columns.some((column) => column.kind)) return setError('Choose at least one payment column.');
-      if (columns.some((column) => column.kind && column.kind !== 'other') && !/^\d{4}$/.test(year)) return setError('Enter the four-digit year for the month columns.');
-      if (columns[Number(nameColumn)]?.kind) return setError('The member column cannot also be a payment column.');
-    } else if (amountColumn === '' || amountColumn === nameColumn) return setError('Choose separate member and amount columns.');
+      if (!columns.some((column) => column.kind)) return setError('Open “Change column choices” and choose at least one payment column.');
+      if (columns.some((column) => column.kind && column.kind !== 'other') && !/^\d{4}$/.test(year)) return setError('Enter the year that the month columns refer to.');
+      if (columns[Number(nameColumn)]?.kind) return setError('The member name column cannot also be a payment column.');
+    } else if (amountColumn === '' || amountColumn === nameColumn) return setError('Choose different columns for member names and payment amounts.');
+    const voidedIndex = headers.findIndex((header) => headerMatches(header, /^voided$/i));
     const result = makeImportRows({
       sheet, headerRow, layout, nameColumn: Number(nameColumn), amountColumn: Number(amountColumn),
-      dateColumn: dateColumn === '' ? '' : Number(dateColumn), categoryColumn: categoryColumn === '' ? '' : Number(categoryColumn),
+      dateColumn: dateColumn === '' ? '' : Number(dateColumn), dateFormat,
+      categoryColumn: categoryColumn === '' ? '' : Number(categoryColumn),
       memoColumn: memoColumn === '' ? '' : Number(memoColumn),
+      voidedColumn: layout === 'payments' && voidedIndex >= 0 ? voidedIndex : '',
       columns, year, defaultDate, defaultCategory, categories, members, makeId,
     });
-    if (!result.length) return setError('No non-zero payment cells were found in the selected columns.');
-    if (result.length > 1000) return setError('This selection has more than 1,000 payments. Split the workbook into smaller imports.');
+    if (!result.length) return setError('No payments with a non-zero amount were found. Check your column choices.');
+    if (result.length > 1000) return setError('This selection has more than 1,000 payments. Split the file into smaller imports.');
     setRows(result);
     setReview(null);
     setApproved({});
+    setCommitAttempted(false);
   };
 
   const selectedPayload = () => {
     const selected = rows.filter((row) => row.selected);
-    if (!selected.length) throw new Error('Select at least one payment.');
-    return selected.map((row) => {
-      const cents = amountInCents(row.amount);
-      if (row.memo.length > 200) throw new Error(`Shorten the memo for ${row.origin} to 200 characters or fewer.`);
-      if (!row.membershipId || !Number.isSafeInteger(cents) || cents < 1 || !row.date ||
-          !/^\d{4}-(0[1-9]|1[0-2])$/.test(row.reportingMonth) || !categories.includes(row.category)) {
-        throw new Error(`Complete the member, positive amount, date, reporting month and category for ${row.origin}.`);
-      }
-      return { id: row.id, membershipId: row.membershipId, amountCents: cents, date: row.date, reportingMonth: row.reportingMonth, category: row.category, memo: row.memo };
-    });
+    if (!selected.length) throw new Error('Choose at least one payment to include.');
+    if (selected.some((row) => importIssues(row, categories).length)) {
+      throw new Error('Some payments need attention. Open the payments marked below and complete the missing details.');
+    }
+    return selected.map((row) => ({
+      id: row.id, membershipId: row.membershipId, amountCents: amountInCents(row.amount),
+      date: row.date, reportingMonth: row.reportingMonth, category: row.category, memo: row.memo,
+    }));
   };
 
   const check = async () => {
@@ -164,107 +184,254 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setMessage('');
     try {
       const payload = selectedPayload();
-      if (payload.some((row) => review.conflicts[row.id].length && !approved[row.id])) throw new Error('Confirm each possible duplicate or unselect it and check again.');
+      if (payload.some((row) => review.conflicts[row.id].length && !approved[row.id])) throw new Error('Open each possible duplicate and choose “Include this payment anyway”, or leave it out and check again.');
       setBusy(true);
+      setCommitAttempted(true);
       const result = await api(`/groups/${groupId}/imports/commit`, {
         method: 'POST', body: { rows: payload, acknowledged: review.conflicts, confirmedDuplicates: Object.keys(approved).filter((id) => approved[id]) },
       });
       setMessage(`Imported ${result.saved} payment(s). ${result.alreadySaved ? `${result.alreadySaved} previously saved payment(s) were not added again.` : ''}`);
       setRows(null);
       setReview(null);
+      setCommitAttempted(false);
       onImported();
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   };
 
+  const backToSettings = () => {
+    if (commitAttempted && !window.confirm('Some payments may already have been saved. Going back creates a new preview. Check the ledger first to avoid importing them twice. Go back anyway?')) return;
+    setRows(null);
+    setReview(null);
+    setError('');
+  };
+
+  const selected = rows?.filter((row) => row.selected) || [];
+  const needsAttention = selected.filter((row) => importIssues(row, categories).length);
+  const unmatched = unmatchedNameGroups(rows || []);
+  const missingDates = selected.filter((row) => !dateFromCell(row.date)).length;
+  const missingCategories = selected.filter((row) => !categories.includes(row.category)).length;
+  const voidedCount = rows?.filter((row) => row.excludedReason).length || 0;
+  const voidedIncluded = rows?.filter((row) => row.excludedReason && row.selected).length || 0;
+  const duplicateCount = review ? selected.filter((row) => review.conflicts[row.id]?.length).length : 0;
+  const hasWrittenDates = layout === 'payments' && dateColumn !== '' &&
+    sheet?.rows.slice(headerRow).some((row) => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(row[Number(dateColumn)] ?? '').trim()));
+  const selectedColumns = columns.map((column, i) => column.kind
+    ? `${headers[i] || `Column ${i + 1}`} (${column.category})` : '').filter(Boolean);
+
   return (
-    <section className="card stack">
+    <section className="card">
       <fieldset disabled={busy} className="import-controls stack">
-      <h2>Import contributions from Excel</h2>
-      <p className="small muted">Finance roles can review every payment before saving. Totals should be left as ignored columns; they are not payments.</p>
-      {error && <p className="error">{error}</p>}
-      {message && <p role="status">{message}</p>}
-      <label>Excel workbook (.xlsx, up to 750 KB)
-        <input type="file" accept=".xlsx" disabled={busy} onChange={upload} />
-      </label>
-      {sheet && !rows && <>
-        <div className="form-row">
-          <label>Worksheet<select value={sheetIndex} onChange={(event) => setSheetIndex(Number(event.target.value))}>
-            {sheets.map((item, i) => <option key={i} value={i}>{item.name}</option>)}
-          </select></label>
-          <label>Heading row<input type="number" min="1" max={sheet.rows.length} value={headerRow}
-            onChange={(event) => setHeaderRow(Number(event.target.value))} /></label>
-          <label>Layout<select value={layout} onChange={(event) => setLayout(event.target.value)}>
-            <option value="matrix">One row per member, payment columns</option>
-            <option value="payments">One row per payment</option>
-          </select></label>
-          {columnSelect('Member name', nameColumn, setNameColumn)}
-          <label>Default payment date<input type="date" value={defaultDate} onChange={(event) => setDefaultDate(event.target.value)} /></label>
-          {layout === 'matrix' ? <label>Year for month columns<input type="number" min="1000" max="9999" value={year} onChange={(event) => setYear(event.target.value)} /></label> :
-            <label>Default category<select value={defaultCategory} onChange={(event) => setDefaultCategory(event.target.value)}>
-              {categories.map((category) => <option key={category}>{category}</option>)}
-            </select></label>}
-        </div>
-        {layout === 'payments' ? <div className="form-row">
-          {columnSelect('Amount', amountColumn, setAmountColumn)}
-          {columnSelect('Payment date (YYYY-MM-DD or Excel date)', dateColumn, setDateColumn, true)}
-          {columnSelect('Category', categoryColumn, setCategoryColumn, true)}
-          {columnSelect('Memo or event name', memoColumn, setMemoColumn, true)}
-        </div> : <>
-          <p className="small muted">Map each payment column to a month or an event/other payment. Leave totals and other columns ignored.</p>
-          <div className="import-table"><table><thead><tr><th>Column</th><th>Use as</th><th>Category</th></tr></thead><tbody>
-            {headers.map((header, i) => <tr key={i}>
-              <td>{i + 1}: {String(header || '(blank heading)')}</td>
-              <td><select value={columns[i]?.kind || ''} onChange={(event) => changeColumn(i, { kind: event.target.value })}>
-                <option value="">Ignore</option>
-                {months.map((month, index) => <option key={month} value={String(index + 1).padStart(2, '0')}>{month}</option>)}
-                <option value="other">Event / other</option>
-              </select></td>
-              <td><select value={columns[i]?.category || categories[0]} disabled={!columns[i]?.kind}
-                onChange={(event) => changeColumn(i, { category: event.target.value })}>
-                {categories.map((category) => <option key={category}>{category}</option>)}
-              </select></td>
-            </tr>)}
-          </tbody></table></div>
+        <h2>Bring in payments from Excel</h2>
+        <p className="small muted">Choose your file, check what we found, then review possible duplicates. Nothing is saved until you choose Import.</p>
+        {error && <p className="error" role="alert">{error}</p>}
+        {message && <p role="status">{message}</p>}
+
+        {!rows && <>
+          <div className="import-step">
+            <h3>1. Choose your Excel file</h3>
+            <label>Excel file (.xlsx, up to 750 KB)
+              <input type="file" accept=".xlsx" onChange={upload} />
+            </label>
+            {fileName && <p className="small">File loaded: <strong>{fileName}</strong></p>}
+          </div>
+
+          {sheet && <div className="import-step stack">
+            <div>
+              <h3>2. Tell us about your file</h3>
+              <p className="small muted">We suggest column choices below. Check them before continuing. Totals should not be imported as payments.</p>
+            </div>
+            <div className="form-row">
+              {sheets.length > 1 && <label>Which sheet has the payments?
+                <select value={sheetIndex} onChange={(event) => setSheetIndex(Number(event.target.value))}>
+                  {sheets.map((item, i) => <option key={i} value={i}>{item.name}</option>)}
+                </select>
+              </label>}
+              <label>How is your file arranged?
+                <select value={layout} onChange={(event) => setLayout(event.target.value)}>
+                  <option value="matrix">Names down the page, months or events across</option>
+                  <option value="payments">One payment on each row</option>
+                </select>
+              </label>
+              {columnSelect('Column with member names', nameColumn, setNameColumn)}
+              {layout === 'payments' && columnSelect('Column with payment amounts', amountColumn, setAmountColumn)}
+              <label>Date to use when a payment has no date
+                <input type="date" value={defaultDate} onChange={(event) => setDefaultDate(event.target.value)} />
+              </label>
+              {layout === 'matrix' ? <label>What year are the month columns for?
+                <input type="number" min="1000" max="9999" placeholder="For example, 2025" value={year} onChange={(event) => setYear(event.target.value)} />
+              </label> : <label>Category to use when none is provided
+                <select value={defaultCategory} onChange={(event) => setDefaultCategory(event.target.value)}>
+                  {categories.map((category) => <option key={category}>{category}</option>)}
+                </select>
+              </label>}
+            </div>
+            {hasWrittenDates && <label>How are dates with slashes written in your file?
+              <select value={dateFormat} onChange={(event) => setDateFormat(event.target.value)}>
+                <option value="">I will check these dates in the next step</option>
+                <option value="month-day-year">Month / day / year (example: 12/31/2025)</option>
+                <option value="day-month-year">Day / month / year (example: 31/12/2025)</option>
+              </select>
+            </label>}
+            {layout === 'matrix' && <p className="small">
+              <strong>Payment columns selected:</strong> {selectedColumns.length ? selectedColumns.join(', ') : 'None yet. Open the choices below to select them.'}
+            </p>}
+            {layout === 'payments' && <p className="small">
+              <strong>Also using:</strong> {[
+                dateColumn !== '' && `date: ${headers[Number(dateColumn)] || `column ${Number(dateColumn) + 1}`}`,
+                categoryColumn !== '' && `category: ${headers[Number(categoryColumn)] || `column ${Number(categoryColumn) + 1}`}`,
+                memoColumn !== '' && `note: ${headers[Number(memoColumn)] || `column ${Number(memoColumn) + 1}`}`,
+              ].filter(Boolean).join(', ') || 'no date, category or note column'}
+            </p>}
+            <details className="import-options">
+              <summary>Change column choices or heading row</summary>
+              <div className="stack">
+                <label>Row containing the column headings
+                  <input type="number" min="1" max={sheet.rows.length} value={headerRow} onChange={(event) => setHeaderRow(Number(event.target.value))} />
+                </label>
+                {layout === 'payments' ? <div className="form-row">
+                  {columnSelect('Payment date column', dateColumn, setDateColumn, true)}
+                  {columnSelect('Category column', categoryColumn, setCategoryColumn, true)}
+                  {columnSelect('Note or event name column', memoColumn, setMemoColumn, true)}
+                </div> : <div className="stack">
+                  <p className="small muted">Choose what each column contains. Leave totals and anything you do not want to import as “Do not import”.</p>
+                  {headers.map((header, i) => <div className="import-column" key={i}>
+                    <strong>{i + 1}: {String(header || '(blank heading)')}</strong>
+                    <label>Use this column for
+                      <select value={columns[i]?.kind || ''} onChange={(event) => changeColumn(i, { kind: event.target.value })}>
+                        <option value="">Do not import</option>
+                        {months.map((month, index) => <option key={month} value={String(index + 1).padStart(2, '0')}>{month}</option>)}
+                        <option value="other">Event or other payments</option>
+                      </select>
+                    </label>
+                    {columns[i]?.kind && <label>Category
+                      <select value={columns[i].category} onChange={(event) => changeColumn(i, { category: event.target.value })}>
+                        {categories.map((category) => <option key={category}>{category}</option>)}
+                      </select>
+                    </label>}
+                  </div>)}
+                </div>}
+              </div>
+            </details>
+            <div><button type="button" disabled={headerRow < 1 || headerRow > sheet.rows.length} onClick={preview}>Continue to payment review</button></div>
+          </div>}
         </>}
-        <button type="button" disabled={busy || headerRow < 1 || headerRow > sheet.rows.length} onClick={preview}>Create preview</button>
-      </>}
-      {rows && <>
-        <p className="small">Check member matches, amounts, dates, reporting months and categories. Unselect rows you do not want to import. Date defaults to the chosen date when the sheet has none; reporting month is separate.</p>
-        <div className="import-table"><table><thead><tr><th>Import</th><th>Spreadsheet</th><th>Member match</th><th>Amount</th><th>Payment date</th><th>Reporting month</th><th>Category</th><th>Memo</th><th>Duplicate review</th></tr></thead>
-          <tbody>{rows.map((row) => <tr key={row.id}>
-            <td><input aria-label={`Import ${row.origin}`} type="checkbox" checked={row.selected} onChange={(event) => changeRow(row.id, { selected: event.target.checked })} /></td>
-            <td>{row.origin}<br /><strong>{row.name || '(no name)'}</strong></td>
-            <td><select aria-label={`Member for ${row.origin}`} value={row.membershipId} onChange={(event) => changeRow(row.id, { membershipId: event.target.value })}>
-              <option value="">Match a member</option>
-              {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
-            </select></td>
-            <td><input aria-label={`Amount for ${row.origin}`} type="text" inputMode="decimal" value={row.amount} onChange={(event) => changeRow(row.id, { amount: event.target.value })} /></td>
-            <td><input aria-label={`Date for ${row.origin}`} type="date" value={row.date} onChange={(event) => changeRow(row.id, { date: event.target.value })} /></td>
-            <td><input aria-label={`Reporting month for ${row.origin}`} type="month" value={row.reportingMonth} onChange={(event) => changeRow(row.id, { reportingMonth: event.target.value })} /></td>
-            <td><select aria-label={`Category for ${row.origin}`} value={row.category} onChange={(event) => changeRow(row.id, { category: event.target.value })}>
-              <option value="">Choose category</option>
-              {categories.map((category) => <option key={category}>{category}</option>)}
-            </select></td>
-            <td><input aria-label={`Memo for ${row.origin}`} type="text" maxLength="200" value={row.memo} onChange={(event) => changeRow(row.id, { memo: event.target.value })} /></td>
-            <td>{review && row.selected && <>
-              {review.alreadySaved.includes(row.id) && <span>Already saved. </span>}
-              {review.conflicts[row.id]?.length > 0 && <>
-                <span>Possible duplicate: same member, category and reporting month.</span>
-                <ul>{review.conflicts[row.id].map((id) => <li key={id}>
-                  {review.details[id]?.source === 'import' && rows.some((item) => item.id === id) ? 'Another preview row' : 'Existing payment'}: {money(review.details[id]?.amountCents)}, {review.details[id]?.date}
-                </li>)}</ul>
-                <label className="inline"><input type="checkbox" checked={!!approved[row.id]} onChange={(event) => setApproved({ ...approved, [row.id]: event.target.checked })} /> Import anyway</label>
-              </>}
-            </>}</td>
-          </tr>)}</tbody>
-        </table></div>
-        <div className="actions">
-          <button type="button" className="secondary" disabled={busy} onClick={() => { setRows(null); setReview(null); setError(''); }}>Change mapping</button>
-          <button type="button" disabled={busy} onClick={check}>Check for duplicates</button>
-          {review && <button type="button" disabled={busy} onClick={commit}>Import selected payments</button>}
-        </div>
-      </>}
+
+        {rows && <div className="import-step stack">
+          <div>
+            <h3>3. Check your payments</h3>
+            <p>{selected.length} selected {selected.length === 1 ? 'payment' : 'payments'}{needsAttention.length > 0
+              ? ` · ${needsAttention.length} ${needsAttention.length === 1 ? 'needs' : 'need'} attention`
+              : selected.length ? ' · ready to check for duplicates' : ' · choose at least one to continue'}</p>
+            <p className="small muted">Open a payment to change it or leave it out. The payment date and the month used for reports are kept separately.</p>
+            {voidedCount > 0 && <p className="small">{voidedCount} {voidedCount === 1 ? 'payment was' : 'payments were'} marked voided in the file. {voidedIncluded ? `${voidedIncluded} selected for import.` : 'All are left out.'} Including one records it as an active payment.</p>}
+          </div>
+
+          {unmatched.length > 0 && <div className="import-help">
+            <h3>Match names from your file</h3>
+            <p className="small">For each name, choose the person already in this group. A choice applies to all unmatched payments with that name; check that they belong to the same person.</p>
+            {unmatched.map((group) => <label key={group.key}>
+              {group.name || `No name (${rows.find((row) => row.id === group.key.slice(6))?.origin || 'one payment'})`} · {group.count} {group.count === 1 ? 'payment' : 'payments'}
+              <select value="" onChange={(event) => {
+                if (event.target.value) updateRows((previous) => assignMemberToGroup(previous, group.key, event.target.value));
+              }}>
+                <option value="">Choose a member</option>
+                {members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+              </select>
+            </label>)}
+          </div>}
+
+          {missingDates > 0 && <div className="import-help">
+            <h3>Help with {missingDates} {missingDates === 1 ? 'date' : 'dates'}</h3>
+            <p className="small">Some dates were missing or could not be read. You can fix each payment below, or use one date for all of them. Existing dates and report months will not be changed; where the report month is missing, it will use this date's month.</p>
+            <div className="actions">
+              <label>Date to use<input type="date" value={bulkDate} onChange={(event) => setBulkDate(event.target.value)} /></label>
+              <button type="button" className="secondary" onClick={() => {
+                if (!dateFromCell(bulkDate)) return setError('Choose a valid date first.');
+                updateRows((previous) => fillMissingDates(previous, bulkDate));
+              }}>Use this date for missing dates</button>
+            </div>
+          </div>}
+
+          {missingCategories > 0 && <div className="import-help">
+            <h3>Help with {missingCategories} {missingCategories === 1 ? 'category' : 'categories'}</h3>
+            <p className="small">You can choose a category for each payment below, or apply one to every payment without a recognized category, even if the labels in the file differ.</p>
+            <div className="actions">
+              <label>Category to use<select value={bulkCategory} onChange={(event) => setBulkCategory(event.target.value)}>
+                {categories.map((category) => <option key={category}>{category}</option>)}
+              </select></label>
+              <button type="button" className="secondary" onClick={() => updateRows((previous) => previous.map((row) =>
+                row.selected && !categories.includes(row.category) ? { ...row, category: bulkCategory } : row
+              ))}>Use this category for missing categories</button>
+            </div>
+          </div>}
+
+          {review && <div className="import-help">
+            <h3>4. Review possible duplicates</h3>
+            <p>{duplicateCount ? `${duplicateCount} selected ${duplicateCount === 1 ? 'payment may' : 'payments may'} already be recorded. Open each one to compare it and decide what to do.` : 'No possible duplicates were found.'}</p>
+            {review.alreadySaved.length > 0 && <p className="small">Some payments in this preview were already saved. They will not be added again.</p>}
+            {duplicateCount > 0 && <button type="button" className="secondary" onClick={() => updateRows((previous) => previous.map((row) =>
+              review.conflicts[row.id]?.length ? { ...row, selected: false } : row
+            ))}>Leave out all possible duplicates</button>}
+          </div>}
+
+          <div className="stack">
+            {rows.map((row) => {
+              const issues = row.selected ? importIssues(row, categories) : [];
+              const conflicts = review && row.selected ? review.conflicts[row.id] || [] : [];
+              const cents = amountInCents(row.amount);
+              const member = members.find((item) => item.id === row.membershipId);
+              return <div className="import-payment" key={row.id}>
+                <label className="inline small"><input type="checkbox" checked={row.selected}
+                  onChange={(event) => changeRow(row.id, { selected: event.target.checked })} /> Include this payment</label>
+                <details>
+                  <summary>
+                    <span><strong>{row.name || 'No name in file'}</strong> · {Number.isSafeInteger(cents) ? money(cents) : row.amount || 'No amount'} · {row.reportingMonth || 'Month not set'}</span>
+                    <span className="small muted">{!row.selected ? `Not included${row.excludedReason ? ` — ${row.excludedReason}` : ''}` : issues.length ? `Needs attention: ${issues.join('; ')}` : conflicts.length ? 'Possible duplicate — open to review' : member ? `Matched to ${member.name}` : 'Open to review'}</span>
+                    <span className="small">View or edit</span>
+                  </summary>
+                  <div className="stack import-payment-details">
+                    <p className="small muted">From {row.origin} in {fileName}</p>
+                    {row.excludedReason && <p className="small">{row.excludedReason}. If included, it will be recorded as an active payment.</p>}
+                    {issues.length > 0 && <p className="error">{issues.join('. ')}.</p>}
+                    <div className="form-row">
+                      <label>Member
+                        <select value={row.membershipId} onChange={(event) => changeRow(row.id, { membershipId: event.target.value })}>
+                          <option value="">Choose a member</option>
+                          {members.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+                        </select>
+                      </label>
+                      <label>Amount<input type="text" inputMode="decimal" value={row.amount} onChange={(event) => changeRow(row.id, { amount: event.target.value })} /></label>
+                      <label>Payment date<input type="date" value={row.date} onChange={(event) => changeRow(row.id, {
+                        date: event.target.value, reportingMonth: row.reportingMonth || event.target.value.slice(0, 7),
+                      })} /></label>
+                      <label>Month for reports<input type="month" value={row.reportingMonth} onChange={(event) => changeRow(row.id, { reportingMonth: event.target.value })} /></label>
+                      <label>Category<select value={row.category} onChange={(event) => changeRow(row.id, { category: event.target.value })}>
+                        <option value="">Choose a category</option>
+                        {categories.map((category) => <option key={category}>{category}</option>)}
+                      </select></label>
+                      <label>Note<input type="text" maxLength="200" value={row.memo} onChange={(event) => changeRow(row.id, { memo: event.target.value })} /></label>
+                    </div>
+                    {review?.alreadySaved.includes(row.id) && <p className="small">This payment was already saved and will not be added again.</p>}
+                    {conflicts.length > 0 && <div className="import-help">
+                      <p>These payments have the same member, category and report month. They may be separate payments:</p>
+                      <ul>{conflicts.map((id) => <li key={id}>
+                        {review.details[id]?.source === 'import' && rows.some((item) => item.id === id) ? 'Another payment in this preview' : 'Payment already in the ledger'}: {money(review.details[id]?.amountCents)}, {review.details[id]?.date}
+                      </li>)}</ul>
+                      <label className="inline"><input type="checkbox" checked={!!approved[row.id]}
+                        onChange={(event) => setApproved({ ...approved, [row.id]: event.target.checked })} /> Include this payment anyway</label>
+                    </div>}
+                  </div>
+                </details>
+              </div>;
+            })}
+          </div>
+          <div className="actions">
+            <button type="button" className="secondary" onClick={backToSettings}>Back to file settings</button>
+            <button type="button" onClick={check}>Check for duplicates</button>
+            {review && <button type="button" onClick={commit}>Import selected payments</button>}
+          </div>
+        </div>}
       </fieldset>
     </section>
   );

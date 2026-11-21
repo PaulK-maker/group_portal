@@ -17,16 +17,23 @@ export function matchMember(name, members) {
   return matches.length === 1 ? matches[0].id : '';
 }
 
-export function dateFromCell(value) {
+export function dateFromCell(value, format = '') {
   const text = String(value ?? '').trim();
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
-  const date = new Date(`${text}T00:00:00.000Z`);
-  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === text ? text : '';
+  let iso = text;
+  const parts = text.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (parts && (format === 'month-day-year' || format === 'day-month-year')) {
+    const month = format === 'month-day-year' ? parts[1] : parts[2];
+    const day = format === 'month-day-year' ? parts[2] : parts[1];
+    iso = `${parts[3]}-${month.padStart(2, '0')}-${day.padStart(2, '0')}`;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return '';
+  const date = new Date(`${iso}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === iso ? iso : '';
 }
 
-export function makeImportRows({ sheet, headerRow, layout, nameColumn, amountColumn, dateColumn, categoryColumn, memoColumn = '', columns, year, defaultDate, defaultCategory, categories, members, makeId }) {
+export function makeImportRows({ sheet, headerRow, layout, nameColumn, amountColumn, dateColumn, dateFormat = '', categoryColumn, memoColumn = '', voidedColumn = '', columns, year, defaultDate, defaultCategory, categories, members, makeId }) {
   const results = [];
-  const append = (rowIndex, columnIndex, rawAmount, category, date, reportingMonth, memo) => {
+  const append = (rowIndex, columnIndex, rawAmount, category, date, reportingMonth, memo, originalDate = '', originalCategory = '', excludedReason = '') => {
     const cents = amountInCents(rawAmount);
     if (cents === null || cents === 0) return;
     const name = String(sheet.rows[rowIndex][nameColumn] ?? '').trim();
@@ -40,7 +47,10 @@ export function makeImportRows({ sheet, headerRow, layout, nameColumn, amountCol
       reportingMonth,
       category,
       memo,
-      selected: true,
+      originalDate,
+      originalCategory,
+      excludedReason,
+      selected: !excludedReason,
     });
   };
   for (let r = headerRow; r < sheet.rows.length; r += 1) {
@@ -54,12 +64,54 @@ export function makeImportRows({ sheet, headerRow, layout, nameColumn, amountCol
       });
     } else {
       const sourceDate = dateColumn === '' || row[dateColumn] === '' || row[dateColumn] == null
-        ? defaultDate : dateFromCell(row[dateColumn]);
+        ? defaultDate : dateFromCell(row[dateColumn], dateFormat);
       const rawCategory = categoryColumn === '' ? '' : String(row[categoryColumn] ?? '').trim();
       const category = rawCategory ? (categories.find((c) => c.toLocaleLowerCase() === rawCategory.toLocaleLowerCase()) || '') : defaultCategory;
       const memo = memoColumn === '' ? '' : String(row[memoColumn] ?? '').trim();
-      append(r, amountColumn, row[amountColumn], category, sourceDate, sourceDate.slice(0, 7), memo);
+      const voided = voidedColumn === '' ? '' : String(row[voidedColumn] ?? '').trim();
+      const excludedReason = /^(true|yes|1|void|voided)(:.*)?$/i.test(voided) ? 'Marked voided in the file' : '';
+      append(r, amountColumn, row[amountColumn], category, sourceDate, sourceDate.slice(0, 7), memo,
+        sourceDate ? '' : String(row[dateColumn] ?? ''), category ? '' : rawCategory, excludedReason);
     }
   }
   return results;
+}
+
+export function importIssues(row, categories) {
+  const issues = [];
+  const cents = amountInCents(row.amount);
+  if (!row.membershipId) issues.push('Choose a member');
+  if (!Number.isSafeInteger(cents) || cents < 1) issues.push('Enter an amount greater than zero');
+  if (!dateFromCell(row.date)) issues.push(row.originalDate ? `Check the date "${row.originalDate}"` : 'Choose a payment date');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(row.reportingMonth)) issues.push('Choose a month for the report');
+  if (!categories.includes(row.category)) issues.push(row.originalCategory ? `Choose a category for "${row.originalCategory}"` : 'Choose a category');
+  if (row.memo.length > 200) issues.push('Shorten the note to 200 characters or fewer');
+  return issues;
+}
+
+function nameGroupKey(row) {
+  const name = row.name.trim().toLocaleLowerCase().replace(/\s+/g, ' ');
+  return name ? `name:${name}` : `blank:${row.id}`;
+}
+
+export function unmatchedNameGroups(rows) {
+  const groups = new Map();
+  for (const row of rows) {
+    if (!row.selected || row.membershipId) continue;
+    const key = nameGroupKey(row);
+    if (!groups.has(key)) groups.set(key, { key, name: row.name, count: 0 });
+    groups.get(key).count += 1;
+  }
+  return [...groups.values()];
+}
+
+export function assignMemberToGroup(rows, key, membershipId) {
+  return rows.map((row) => row.selected && !row.membershipId && nameGroupKey(row) === key
+    ? { ...row, membershipId } : row);
+}
+
+export function fillMissingDates(rows, date) {
+  if (!dateFromCell(date)) throw new Error('Choose a valid date first.');
+  return rows.map((row) => row.selected && !dateFromCell(row.date)
+    ? { ...row, date, reportingMonth: row.reportingMonth || date.slice(0, 7) } : row);
 }
