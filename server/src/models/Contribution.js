@@ -10,6 +10,12 @@ const contributionSchema = new mongoose.Schema(
     membership: { type: mongoose.Schema.Types.ObjectId, ref: 'Membership', required: true, index: true },
     amountCents: { type: Number, required: true, min: 1 },
     date: { type: Date, default: Date.now },
+    reportingMonth: { type: String, match: /^\d{4}-(0[1-9]|1[0-2])$/ },
+    dateChanges: [{
+      previousDate: { type: Date, required: true },
+      changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+      changedAt: { type: Date, default: Date.now },
+    }],
     method: { type: String, enum: METHODS, default: 'other' },
     category: { type: String, default: 'Dues' },
     reference: { type: String, trim: true }, // confirmation / transaction id

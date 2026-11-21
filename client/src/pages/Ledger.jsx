@@ -1,13 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api, money, toCents, fmtDate, METHOD_LABELS } from '../api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import ProofUpload from '../components/ProofUpload.jsx';
+import ContributionImport from '../components/ContributionImport.jsx';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
 export default function Ledger() {
   const { groupId, isFinance, membership } = useAuth();
-  const categories = membership?.group.settings?.categories || ['Dues'];
+  const categories = useMemo(() => membership?.group?.settings?.categories || ['Dues'], [membership]);
   const [rows, setRows] = useState([]);
   const [members, setMembers] = useState([]);
   const [showVoided, setShowVoided] = useState(false);
@@ -25,7 +26,12 @@ export default function Ledger() {
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
-    if (isFinance) api(`${g}/members`).then((d) => setMembers(d.members.filter((m) => m.status === 'active')));
+    let active = true;
+    setMembers([]);
+    if (isFinance) api(`${g}/members`).then((d) => {
+      if (active) setMembers(d.members.filter((m) => m.status === 'active'));
+    }).catch((e) => { if (active) setError(e.message); });
+    return () => { active = false; };
   }, [g, isFinance]);
 
   const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
@@ -44,6 +50,14 @@ export default function Ledger() {
     const reason = window.prompt(`Void ${money(c.amountCents)} from ${c.memberName}? Reason:`);
     if (!reason) return;
     try { await api(`${g}/contributions/${c._id}/void`, { method: 'POST', body: { reason } }); load(); }
+    catch (err) { setError(err.message); }
+  };
+
+  const editImportedDate = async (c) => {
+    const date = window.prompt('Enter the payment date (YYYY-MM-DD). The reporting month will stay the same.', c.date.slice(0, 10));
+    if (date === null) return;
+    setError('');
+    try { await api(`${g}/contributions/${c._id}/date`, { method: 'PATCH', body: { date } }); load(); }
     catch (err) { setError(err.message); }
   };
 
@@ -95,6 +109,8 @@ export default function Ledger() {
 
       <ProofUpload />
 
+      {isFinance && <ContributionImport key={groupId} groupId={groupId} members={members} categories={categories} onImported={load} />}
+
       <section className="card">
         <div className="row-between">
           <h2>{isFinance ? 'Ledger' : 'My payments'} · {money(total)}</h2>
@@ -124,13 +140,16 @@ export default function Ledger() {
           <tbody>
             {rows.map((c) => (
               <tr key={c._id} className={c.voided ? 'voided' : ''}>
-                <td>{fmtDate(c.date)}</td>
+                <td>{c.source === 'import' ? c.date.slice(0, 10) : fmtDate(c.date)}{c.reportingMonth && <div className="small muted">Reporting: {c.reportingMonth}</div>}</td>
                 <td>{c.memberName}</td>
                 <td><strong>{money(c.amountCents)}</strong></td>
                 <td>{METHOD_LABELS[c.method]}{c.source === 'email' && <span className="tag">email</span>}</td>
                 <td>{c.category}</td>
                 <td className="small">{c.reference}{c.reference && c.memo && ' · '}{c.memo}{c.voided && ` · VOID: ${c.voidReason}`}</td>
-                {isFinance && <td>{!c.voided && <button className="link" onClick={() => voidEntry(c)}>Void</button>}</td>}
+                {isFinance && <td>{!c.voided && <div className="actions">
+                  {c.source === 'import' && <button className="link" onClick={() => editImportedDate(c)}>Edit date</button>}
+                  <button className="link" onClick={() => voidEntry(c)}>Void</button>
+                </div>}</td>}
               </tr>
             ))}
             {!rows.length && <tr><td colSpan="7" className="muted">No payments yet.</td></tr>}

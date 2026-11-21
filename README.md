@@ -7,6 +7,7 @@ Treasurer and member portal for small groups: a church men's group today, any cl
 - **Members**: add and edit members, roles, and the names they pay under
 - **Official**: announcements, meeting minutes and events, attributed to the sender's assigned role
 - **Excel export**: Summary and full Ledger sheets, plus a monthly report for the selected payment category
+- **Excel import**: finance users can map and review member-by-month or one-payment-per-row spreadsheets before adding payments
 
 MERN: MongoDB, Express, React (Vite), Node 18+.
 
@@ -110,6 +111,16 @@ Contribution (source: email)  →  progress bars, totals, Excel export
 ```
 
 Manual entry goes straight to Contribution (source: manual). Money records are never deleted, only **voided with a reason**, so the audit trail stays intact.
+
+### Importing contributions from Excel
+
+On the Ledger page, an admin or treasurer can upload a `.xlsx` workbook (up to 750 KB). Choose a worksheet and heading row, then map either member rows with month/event columns or individual payment rows. Select the year for monthly columns; leave totals and other non-payment columns ignored. For event columns, the column heading is kept as the payment memo. Imported payments use the `Other` payment method.
+
+The preview lets you match names to active group members, adjust amounts, dates, reporting months, categories and memos, or unselect rows. Blank and zero amounts are skipped; invalid amounts must be corrected or unselected. Spreadsheet dates must be Excel date cells or `YYYY-MM-DD`; missing dates use the chosen default, initially today. Month-column amounts retain their selected year and month for monthly reports, independently of the payment date. A finance user can later edit an imported payment date from the ledger; the previous date and editor are retained, and the reporting month remains unchanged.
+
+Check for possible duplicates before importing. Payments for the same member, category and reporting month are flagged, including other selected spreadsheet rows; each flagged row requires confirmation. These are possible matches, not proof that two payments are identical. Unmatched or ambiguous names must be matched manually, and the import never creates members. Check the ledger if an import is interrupted; retrying the same preview will not add its already-saved payments again.
+
+Workbooks are limited to 20 worksheets, 1,000 rows and 60 columns per sheet, 60,000 cells total and 1,000 selected payments per import. The expanded workbook is limited to 20 MB total and 8 MB per internal file. Formula cells need cached values in the workbook; formulas are not recalculated during import.
 
 ### Setting up email capture
 1. Make a dedicated Gmail account for the group. Point the group's Cash App, Venmo and bank (Zelle) notifications to it, or forward them there.

@@ -52,6 +52,9 @@ td { padding: 10px 8px; border-bottom: 1px solid var(--line); vertical-align: to
 tr.dim td, tr.voided td { color: var(--muted); }
 tr.voided td { text-decoration: line-through; }
 @media (max-width: 700px) { table { display: block; overflow-x: auto; } }
+.import-table { overflow-x: auto; }
+.import-table input[type="text"] { min-width: 90px; width: 110px; }
+.import-controls { border: 0; padding: 0; margin: 0; min-width: 0; }
 
 .list { list-style: none; margin: 8px 0; padding: 0; }
 .list li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }

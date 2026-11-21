@@ -101,13 +101,13 @@ router.get('/', ah(async (req, res) => {
   const groups = new Map();
   for (const c of ledger) {
     if (c.voided || c.category !== category) continue;
-    const month = c.date.toISOString().slice(0, 7);
+    const month = c.reportingMonth || c.date.toISOString().slice(0, 7);
     const memberId = String(c.membership?._id || c._id);
     const key = `${month}:${memberId}`;
     if (!groups.has(key)) groups.set(key, { month, member: c.membership?.user?.name, payments: [] });
     groups.get(key).payments.push(c);
   }
-  for (const { month, member, payments } of groups.values()) {
+  for (const { month, member, payments } of [...groups.values()].sort((a, b) => a.month.localeCompare(b.month))) {
     let totalCents = 0;
     for (const c of payments) {
       totalCents += c.amountCents;

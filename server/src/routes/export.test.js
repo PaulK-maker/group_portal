@@ -77,4 +77,10 @@ test('exports fresh monthly category details alongside the complete ledger', asy
   assert.equal(events.getWorksheet('Monthly report').getCell('H2').value, 'Event payment');
   assert.equal(events.getWorksheet('Monthly report').getCell('E3').value, 0.5);
   assert.equal((await fetch(`${url}?category=Unknown`)).status, 400);
+
+  payments.push({ ...payment(2500, 'Dues', 'other', 'Imported'), reportingMonth: '2025-01', source: 'import' });
+  const historical = (await download('Dues')).getWorksheet('Monthly report');
+  const imported = historical.getRows(2, historical.rowCount - 1).find((row) => row.getCell(8).value === 'Imported');
+  assert.equal(imported.getCell(1).value, '2025-01');
+  assert.equal(imported.getCell(3).value.toISOString().slice(0, 10), '2026-11-13');
 });

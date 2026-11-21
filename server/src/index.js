@@ -15,6 +15,7 @@ import proofRoutes from './routes/proofs.js';
 import reminderRoutes from './routes/reminders.js';
 import boardRoutes from './routes/board.js';
 import exportRoutes from './routes/export.js';
+import importRoutes from './routes/imports.js';
 import inboundRoutes from './routes/inbound.js';
 
 const app = express();
@@ -40,6 +41,7 @@ app.use('/api/groups/:groupId/payment-proofs', proofRoutes);
 app.use('/api/groups/:groupId/reminders', reminderRoutes);
 app.use('/api/groups/:groupId/board', boardRoutes);
 app.use('/api/groups/:groupId/export', exportRoutes);
+app.use('/api/groups/:groupId/imports', importRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err);
