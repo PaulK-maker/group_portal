@@ -74,6 +74,20 @@ test('workbook upload, duplicate confirmation, tenant guard and safe retry after
   const uploaded = await post('/workbook', { data: encoded });
   assert.equal(uploaded.status, 200);
   assert.deepEqual((await uploaded.json()).sheets[0].rows[1], ['Alex', 50, 50]);
+
+  const matrix = new ExcelJS.Workbook();
+  const monthly = matrix.addWorksheet('Monthly');
+  monthly.mergeCells('D1:L1');
+  monthly.getCell('D1').value = '2026 monthly contributions';
+  monthly.getCell('C2').value = 'Example Member';
+  for (let column = 4; column <= 15; column += 1) monthly.getRow(2).getCell(column).value = 50;
+  monthly.getCell('P2').value = 150;
+  monthly.getCell('Q2').value = 750;
+  const matrixResponse = await post('/workbook', { data: Buffer.from(await matrix.xlsx.writeBuffer()).toString('base64') });
+  assert.equal(matrixResponse.status, 200);
+  const matrixRow = (await matrixResponse.json()).sheets[0].rows[1];
+  assert.deepEqual([matrixRow[2], matrixRow[3], matrixRow[14], matrixRow[15], matrixRow[16]], ['Example Member', 50, 50, 150, 750]);
+  assert.deepEqual(matrixRow.slice(3, 15), Array(12).fill(50));
   assert.equal((await post('/workbook', { data: Buffer.from('not xlsx').toString('base64') })).status, 400);
   role = 'member';
   assert.equal((await post('/workbook', { data: encoded })).status, 403);

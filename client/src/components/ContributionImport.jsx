@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, money } from '../api.js';
 import {
-  amountInCents, assignMemberToGroup, dateFromCell, fillMissingDates,
-  importIssues, makeImportRows, unmatchedNameGroups,
+  amountInCents, assignMemberToGroup, assignMonthlyColumns, assignSpecialColumn, columnLetter,
+  dateFromCell, fillMissingDates, importIssues, makeImportRows, matchMember, unmatchedNameGroups,
 } from './contributionImportData.js';
 
 const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -40,6 +40,11 @@ export default function ContributionImport({ groupId, members, categories, onImp
   const [categoryColumn, setCategoryColumn] = useState('');
   const [memoColumn, setMemoColumn] = useState('');
   const [columns, setColumns] = useState([]);
+  const [firstMonthColumn, setFirstMonthColumn] = useState('');
+  const [monthCategory, setMonthCategory] = useState(categories.find((category) => category.toLowerCase() === 'dues') || categories[0]);
+  const [specialColumn, setSpecialColumn] = useState('');
+  const [specialCategory, setSpecialCategory] = useState(categories.find((category) => category.toLowerCase() === 'other') || categories[0]);
+  const [specialName, setSpecialName] = useState('Special contribution');
   const [year, setYear] = useState('');
   const [defaultDate, setDefaultDate] = useState(currentDate);
   const [defaultCategory, setDefaultCategory] = useState(categories[0]);
@@ -48,6 +53,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
   const [rows, setRows] = useState(null);
   const [review, setReview] = useState(null);
   const [approved, setApproved] = useState({});
+  const [sourceReviewed, setSourceReviewed] = useState(false);
   const [commitAttempted, setCommitAttempted] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
@@ -71,6 +77,8 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setDateFormat('');
     setCategoryColumn(find(/^category$/i));
     setMemoColumn(find(/^(memo|note|notes|event)$/i));
+    setFirstMonthColumn('');
+    setSpecialColumn('');
     setColumns(row.map((value) => {
       const header = String(value).trim().toLowerCase();
       const index = monthHeaders.findIndex((pattern) => pattern.test(header));
@@ -95,21 +103,23 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setBusy(true);
     try {
       const result = await api(`/groups/${groupId}/imports/workbook`, { method: 'POST', body: { data: await readFile(file) } });
-      const ledger = result.sheets.findIndex((item) => item.name.trim().toLowerCase() === 'ledger' &&
-        item.rows[0]?.some((value) => headerMatches(value, /^(member|member name|name|payer)$/i)) &&
-        item.rows[0]?.some((value) => headerMatches(value, /^(amount|payment|contribution)$/i)));
       setSheets(result.sheets);
       setFileName(file.name);
-      setSheetIndex(ledger >= 0 ? ledger : 0);
+      setSheetIndex(result.sheets.length === 1 ? 0 : -1);
       setHeaderRow(1);
       setRows(null);
       setReview(null);
+      setSourceReviewed(false);
       setCommitAttempted(false);
     } catch (err) { setError(err.message); }
     finally { setBusy(false); }
   };
 
-  const options = headers.map((header, i) => <option key={i} value={String(i)}>{i + 1}: {String(header || '(blank heading)')}</option>);
+  const columnDescription = (header, i) => {
+    const example = sheet?.rows.slice(headerRow).map((row) => row[i]).find((value) => value !== '' && value != null);
+    return `Column ${columnLetter(i)}: ${String(header || '(blank heading)')}${example == null ? '' : ` — example: ${String(example).slice(0, 60)}`}`;
+  };
+  const options = headers.map((header, i) => <option key={i} value={String(i)}>{columnDescription(header, i)}</option>);
   const columnSelect = (label, value, setter, optional = false) => (
     <label>{label}
       <select value={value} onChange={(event) => setter(event.target.value)}>
@@ -123,6 +133,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setRows(update);
     setReview(null);
     setApproved({});
+    setSourceReviewed(false);
     setError('');
   };
   const changeRow = (id, update) => updateRows((previous) => previous.map((row) => row.id === id ? { ...row, ...update } : row));
@@ -150,6 +161,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setRows(result);
     setReview(null);
     setApproved({});
+    setSourceReviewed(false);
     setCommitAttempted(false);
   };
 
@@ -170,6 +182,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setMessage('');
     setReview(null);
     setApproved({});
+    setSourceReviewed(false);
     try {
       const payload = selectedPayload();
       setBusy(true);
@@ -184,6 +197,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setMessage('');
     try {
       const payload = selectedPayload();
+      if (!sourceReviewed) throw new Error('Confirm that you checked the names and amounts before importing.');
       if (payload.some((row) => review.conflicts[row.id].length && !approved[row.id])) throw new Error('Open each possible duplicate and choose “Include this payment anyway”, or leave it out and check again.');
       setBusy(true);
       setCommitAttempted(true);
@@ -217,7 +231,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
   const hasWrittenDates = layout === 'payments' && dateColumn !== '' &&
     sheet?.rows.slice(headerRow).some((row) => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(row[Number(dateColumn)] ?? '').trim()));
   const selectedColumns = columns.map((column, i) => column.kind
-    ? `${headers[i] || `Column ${i + 1}`} (${column.category})` : '').filter(Boolean);
+    ? `${columnLetter(i)}: ${column.kind === 'other' ? (column.note || headers[i] || 'extra payment') : months[Number(column.kind) - 1]} (${column.category})` : '').filter(Boolean);
 
   return (
     <section className="card">
@@ -234,6 +248,16 @@ export default function ContributionImport({ groupId, members, categories, onImp
               <input type="file" accept=".xlsx" onChange={upload} />
             </label>
             {fileName && <p className="small">File loaded: <strong>{fileName}</strong></p>}
+            {sheets.length > 1 && <label>Which sheet has the payments?
+              <select value={sheetIndex < 0 ? '' : sheetIndex} onChange={(event) => {
+                setSheetIndex(event.target.value === '' ? -1 : Number(event.target.value));
+                setHeaderRow(1);
+              }}>
+                <option value="">Choose a sheet</option>
+                {sheets.map((item, i) => <option key={i} value={i}>{item.name}</option>)}
+              </select>
+            </label>}
+            {sheet && <p className="small">Selected sheet: <strong>{sheet.name}</strong></p>}
           </div>
 
           {sheet && <div className="import-step stack">
@@ -242,11 +266,6 @@ export default function ContributionImport({ groupId, members, categories, onImp
               <p className="small muted">We suggest column choices below. Check them before continuing. Totals should not be imported as payments.</p>
             </div>
             <div className="form-row">
-              {sheets.length > 1 && <label>Which sheet has the payments?
-                <select value={sheetIndex} onChange={(event) => setSheetIndex(Number(event.target.value))}>
-                  {sheets.map((item, i) => <option key={i} value={i}>{item.name}</option>)}
-                </select>
-              </label>}
               <label>How is your file arranged?
                 <select value={layout} onChange={(event) => setLayout(event.target.value)}>
                   <option value="matrix">Names down the page, months or events across</option>
@@ -273,6 +292,43 @@ export default function ContributionImport({ groupId, members, categories, onImp
                 <option value="day-month-year">Day / month / year (example: 31/12/2025)</option>
               </select>
             </label>}
+            {layout === 'matrix' && <div className="import-help stack">
+              <h3>12 months in consecutive columns?</h3>
+              <p className="small">Choose the January column. We will select the next 11 columns for February through December, replacing previous month selections. Check the column letters and examples against your file.</p>
+              <div className="form-row">
+                {columnSelect('January column', firstMonthColumn, setFirstMonthColumn)}
+                <label>Category for these months
+                  <select value={monthCategory} onChange={(event) => setMonthCategory(event.target.value)}>
+                    {categories.map((category) => <option key={category}>{category}</option>)}
+                  </select>
+                </label>
+              </div>
+              <div><button type="button" className="secondary" onClick={() => {
+                try {
+                  if (nameColumn === '' || firstMonthColumn === '') throw new Error('Choose the member name column and January column first.');
+                  setColumns(assignMonthlyColumns(columns, headers, Number(firstMonthColumn), Number(nameColumn), monthCategory));
+                  setError('');
+                } catch (err) { setError(err.message); }
+              }}>Select January to December</button></div>
+              <h3>Extra contributions (optional)</h3>
+              <p className="small">Select an extra payment column only if you want to import it. Do not select a total column.</p>
+              <div className="form-row">
+                {columnSelect('Extra payment column', specialColumn, setSpecialColumn, true)}
+                <label>Category
+                  <select value={specialCategory} onChange={(event) => setSpecialCategory(event.target.value)}>
+                    {categories.map((category) => <option key={category}>{category}</option>)}
+                  </select>
+                </label>
+                <label>Payment note<input type="text" maxLength="200" value={specialName} onChange={(event) => setSpecialName(event.target.value)} /></label>
+              </div>
+              <div><button type="button" className="secondary" onClick={() => {
+                try {
+                  if (nameColumn === '' || specialColumn === '') throw new Error('Choose the member name column and extra payment column first.');
+                  setColumns(assignSpecialColumn(columns, headers, Number(specialColumn), Number(nameColumn), specialCategory, specialName));
+                  setError('');
+                } catch (err) { setError(err.message); }
+              }}>Add extra payment column</button></div>
+            </div>}
             {layout === 'matrix' && <p className="small">
               <strong>Payment columns selected:</strong> {selectedColumns.length ? selectedColumns.join(', ') : 'None yet. Open the choices below to select them.'}
             </p>}
@@ -296,7 +352,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
                 </div> : <div className="stack">
                   <p className="small muted">Choose what each column contains. Leave totals and anything you do not want to import as “Do not import”.</p>
                   {headers.map((header, i) => <div className="import-column" key={i}>
-                    <strong>{i + 1}: {String(header || '(blank heading)')}</strong>
+                    <strong>{columnDescription(header, i)}</strong>
                     <label>Use this column for
                       <select value={columns[i]?.kind || ''} onChange={(event) => changeColumn(i, { kind: event.target.value })}>
                         <option value="">Do not import</option>
@@ -320,16 +376,18 @@ export default function ContributionImport({ groupId, members, categories, onImp
         {rows && <div className="import-step stack">
           <div>
             <h3>3. Check your payments</h3>
+            <p className="small">File: <strong>{fileName}</strong> · Sheet: <strong>{sheet.name}</strong></p>
             <p>{selected.length} selected {selected.length === 1 ? 'payment' : 'payments'}{needsAttention.length > 0
               ? ` · ${needsAttention.length} ${needsAttention.length === 1 ? 'needs' : 'need'} attention`
               : selected.length ? ' · ready to check for duplicates' : ' · choose at least one to continue'}</p>
-            <p className="small muted">Open a payment to change it or leave it out. The payment date and the month used for reports are kept separately.</p>
+            <p className="small muted">Compare the file value with the amount to be saved. For example, 50 in the file should show as $50.00. Open a payment to change it or leave it out. The payment date and the month used for reports are kept separately.</p>
             {voidedCount > 0 && <p className="small">{voidedCount} {voidedCount === 1 ? 'payment was' : 'payments were'} marked voided in the file. {voidedIncluded ? `${voidedIncluded} selected for import.` : 'All are left out.'} Including one records it as an active payment.</p>}
           </div>
 
           {unmatched.length > 0 && <div className="import-help">
             <h3>Match names from your file</h3>
             <p className="small">For each name, choose the person already in this group. A choice applies to all unmatched payments with that name; check that they belong to the same person.</p>
+            <p className="small">Members are not created by this import. Add missing people on the Members page first; you will need to choose this file again afterwards.</p>
             {unmatched.map((group) => <label key={group.key}>
               {group.name || `No name (${rows.find((row) => row.id === group.key.slice(6))?.origin || 'one payment'})`} · {group.count} {group.count === 1 ? 'payment' : 'payments'}
               <select value="" onChange={(event) => {
@@ -386,8 +444,9 @@ export default function ContributionImport({ groupId, members, categories, onImp
                   onChange={(event) => changeRow(row.id, { selected: event.target.checked })} /> Include this payment</label>
                 <details>
                   <summary>
-                    <span><strong>{row.name || 'No name in file'}</strong> · {Number.isSafeInteger(cents) ? money(cents) : row.amount || 'No amount'} · {row.reportingMonth || 'Month not set'}</span>
-                    <span className="small muted">{!row.selected ? `Not included${row.excludedReason ? ` — ${row.excludedReason}` : ''}` : issues.length ? `Needs attention: ${issues.join('; ')}` : conflicts.length ? 'Possible duplicate — open to review' : member ? `Matched to ${member.name}` : 'Open to review'}</span>
+                    <span>File: <strong>{row.name || 'No name'}</strong> · amount {row.sourceAmount || 'blank'} · {row.origin}</span>
+                    <span>Will save: <strong>{member?.name || 'Choose a member'}</strong> · {Number.isSafeInteger(cents) ? money(cents) : row.amount || 'No amount'} · {row.reportingMonth || 'Month not set'}</span>
+                    <span className="small muted">{!row.selected ? `Not included${row.excludedReason ? ` — ${row.excludedReason}` : ''}` : issues.length ? `Needs attention: ${issues.join('; ')}` : conflicts.length ? 'Possible duplicate — open to review' : member && matchMember(row.name, [member]) !== member.id ? 'Name differs from file — check this match' : 'Ready to review'}</span>
                     <span className="small">View or edit</span>
                   </summary>
                   <div className="stack import-payment-details">
@@ -426,6 +485,10 @@ export default function ContributionImport({ groupId, members, categories, onImp
               </div>;
             })}
           </div>
+          {review && <label className="inline">
+            <input type="checkbox" checked={sourceReviewed} onChange={(event) => setSourceReviewed(event.target.checked)} />
+            I checked the names and amounts against the file, including who each payment will be saved under.
+          </label>}
           <div className="actions">
             <button type="button" className="secondary" onClick={backToSettings}>Back to file settings</button>
             <button type="button" onClick={check}>Check for duplicates</button>

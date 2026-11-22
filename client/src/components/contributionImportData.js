@@ -8,6 +8,45 @@ export function amountInCents(value) {
   return cents <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(cents) : NaN;
 }
 
+export function columnLetter(index) {
+  let number = index + 1;
+  let result = '';
+  while (number > 0) {
+    number -= 1;
+    result = String.fromCharCode(65 + (number % 26)) + result;
+    number = Math.floor(number / 26);
+  }
+  return result;
+}
+
+export function assignMonthlyColumns(columns, headers, first, nameColumn, category) {
+  if (!Number.isInteger(first) || first < 0 || first + 12 > columns.length) {
+    throw new Error('Choose a starting column with 12 consecutive month columns after it.');
+  }
+  if (nameColumn >= first && nameColumn < first + 12) throw new Error('The member name column cannot be one of the month columns.');
+  for (let i = first; i < first + 12; i += 1) {
+    if (/^(grand\s+)?(total|subtotal|balance|remaining)\b/i.test(String(headers[i] ?? '').trim())) {
+      throw new Error(`Column ${columnLetter(i)} looks like a total, not a month. Check the starting column.`);
+    }
+    if (columns[i].kind === 'other') throw new Error(`Column ${columnLetter(i)} is already selected for other payments. Change that choice first.`);
+  }
+  return columns.map((column, i) => {
+    if (i >= first && i < first + 12) return { ...column, kind: String(i - first + 1).padStart(2, '0'), category };
+    return /^\d{2}$/.test(column.kind) ? { ...column, kind: '' } : column;
+  });
+}
+
+export function assignSpecialColumn(columns, headers, index, nameColumn, category, note) {
+  if (!Number.isInteger(index) || index < 0 || index >= columns.length) throw new Error('Choose the column with the extra payments.');
+  if (index === nameColumn) throw new Error('The member name column cannot also be a payment column.');
+  if (columns[index].kind && columns[index].kind !== 'other') throw new Error('That column is already used for a month. Choose a different column.');
+  if (/^(grand\s+)?(total|subtotal|balance|remaining)\b/i.test(String(headers[index] ?? '').trim())) {
+    throw new Error(`Column ${columnLetter(index)} looks like a total. Do not import totals as payments.`);
+  }
+  if (!note.trim() || note.length > 200) throw new Error('Enter a short name for the extra payments.');
+  return columns.map((column, i) => i === index ? { ...column, kind: 'other', category, note: note.trim() } : column);
+}
+
 export function matchMember(name, members) {
   const normalized = String(name ?? '').trim().toLocaleLowerCase().replace(/\s+/g, ' ');
   if (!normalized) return '';
@@ -39,10 +78,11 @@ export function makeImportRows({ sheet, headerRow, layout, nameColumn, amountCol
     const name = String(sheet.rows[rowIndex][nameColumn] ?? '').trim();
     results.push({
       id: makeId(),
-      origin: `Row ${rowIndex + 1}, column ${columnIndex + 1}`,
+      origin: `Row ${rowIndex + 1}, column ${columnLetter(columnIndex)}`,
       name,
       membershipId: matchMember(name, members),
       amount: String(rawAmount),
+      sourceAmount: String(rawAmount),
       date,
       reportingMonth,
       category,
@@ -59,7 +99,7 @@ export function makeImportRows({ sheet, headerRow, layout, nameColumn, amountCol
       columns.forEach((column, i) => {
         if (!column.kind) return;
         const month = column.kind === 'other' ? defaultDate.slice(0, 7) : `${year}-${column.kind}`;
-        const memo = column.kind === 'other' ? String(sheet.rows[headerRow - 1][i] ?? '').trim() : '';
+        const memo = column.kind === 'other' ? (column.note || String(sheet.rows[headerRow - 1][i] ?? '').trim()) : '';
         append(r, i, row[i], column.category, defaultDate, month, memo);
       });
     } else {

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { amountInCents, assignMemberToGroup, dateFromCell, fillMissingDates, importIssues, makeImportRows, matchMember, unmatchedNameGroups } from './contributionImportData.js';
+import { amountInCents, assignMemberToGroup, assignMonthlyColumns, assignSpecialColumn, columnLetter, dateFromCell, fillMissingDates, importIssues, makeImportRows, matchMember, unmatchedNameGroups } from './contributionImportData.js';
 
 test('builds monthly and special payments without importing totals', () => {
   const members = [{ id: 'one', name: 'Sam Lee' }, { id: 'two', name: 'Pat' }, { id: 'three', name: 'Pat' }];
@@ -28,6 +28,31 @@ test('builds monthly and special payments without importing totals', () => {
   assert.equal(rows[1].memo, 'SPECIAL');
   assert.equal(rows[3].membershipId, '');
   assert.equal(rows[0].date, '2026-11-20');
+});
+
+test('maps an unlabeled monthly sheet without importing totals or changing 50 dollars', () => {
+  const headers = ['', '', '', '2026 monthly contributions', '', '', '', '', '', '', '', '', '', '', '', '', ''];
+  const data = ['', '', 'Example Member', ...Array(12).fill(50), 150, 750];
+  const sheet = { rows: [headers, data] };
+  const empty = headers.map(() => ({ kind: '', category: 'Dues' }));
+  const months = assignMonthlyColumns(empty, headers, 3, 2, 'Dues');
+  const columns = assignSpecialColumn(months, headers, 15, 2, 'Other', 'Special');
+  let id = 0;
+  const rows = makeImportRows({
+    sheet, headerRow: 1, layout: 'matrix', nameColumn: 2, columns, year: '2026',
+    defaultDate: '2026-11-20', defaultCategory: 'Dues', categories: ['Dues', 'Other'],
+    members: [{ id: 'member-id', name: 'Example Member' }], makeId: () => String(++id),
+  });
+  assert.deepEqual(rows.map((row) => [row.name, row.membershipId, amountInCents(row.amount), row.reportingMonth, row.memo]), [
+    ...Array.from({ length: 12 }, (_, i) => ['Example Member', 'member-id', 5000, `2026-${String(i + 1).padStart(2, '0')}`, '']),
+    ['Example Member', 'member-id', 15000, '2026-11', 'Special'],
+  ]);
+  assert.equal(columns[16].kind, '');
+  assert.equal(columnLetter(2), 'C');
+  assert.equal(columnLetter(26), 'AA');
+  assert.throws(() => assignMonthlyColumns(empty, headers, 6, 2, 'Dues'));
+  assert.throws(() => assignMonthlyColumns(empty, headers, 2, 2, 'Dues'));
+  assert.throws(() => assignSpecialColumn(months, headers, 3, 2, 'Other', 'Special'));
 });
 
 test('maps per-payment dates and categories and leaves unknown values for review', () => {
