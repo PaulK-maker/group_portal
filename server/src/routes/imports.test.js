@@ -50,9 +50,14 @@ test('workbook upload, duplicate confirmation, tenant guard and safe retry after
   }) }));
   let calls = 0;
   let injectAfterCreate = false;
+  let manualFailure = false;
   t.mock.method(Contribution, 'create', async (data) => {
     calls += 1;
     if (calls === 2) throw new Error('simulated interrupted write');
+    if (manualFailure && data.source === 'manual' && data.reportingMonth === '2027-02') {
+      manualFailure = false;
+      throw new Error('simulated interrupted monthly write');
+    }
     payments.push({ ...data, voided: false });
     if (injectAfterCreate) {
       payments.push({ ...existing, _id: new mongoose.Types.ObjectId(), date: new Date('2024-02-10T00:00:00.000Z') });
@@ -131,6 +136,35 @@ test('workbook upload, duplicate confirmation, tenant guard and safe retry after
   assert.match((await changed.json()).error, /after 1 new payments were saved/);
   const refreshed = await (await post('/check', { rows: laterRows })).json();
   assert.equal(refreshed.conflicts[laterRows[1].id].length, 1);
+
+  const manualRows = ['2027-01', '2027-02', '2027-03'].map((month, i) => ({
+    ...makeRow(i === 1 ? 2500 : 2000), reportingMonth: month, method: 'cash', reference: 'receipt 1',
+  }));
+  role = 'member';
+  assert.equal((await post('/monthly/check', { rows: manualRows })).status, 403);
+  role = 'treasurer';
+  assert.equal((await post('/monthly/check', { rows: [{ ...manualRows[0], method: 'invalid' }] })).status, 400);
+  assert.equal((await post('/monthly/check', { rows: [{ ...manualRows[0], membershipId: String(new mongoose.Types.ObjectId()) }] })).status, 400);
+  const monthlyReview = await (await post('/monthly/check', { rows: manualRows })).json();
+  const monthlyBody = { rows: manualRows, acknowledged: monthlyReview.conflicts, confirmedDuplicates: [] };
+  manualFailure = true;
+  assert.equal((await post('/monthly/commit', monthlyBody)).status, 500);
+  const partial = payments.find((payment) => String(payment._id) === manualRows[0].id);
+  assert.equal(partial.source, 'manual');
+  assert.equal(partial.method, 'cash');
+  assert.equal(partial.reference, 'receipt 1');
+  assert.equal(partial.reportingMonth, '2027-01');
+  assert.equal(partial.date.toISOString().slice(0, 10), '2026-11-20');
+  assert.equal((await post('/monthly/check', { rows: [{ ...manualRows[0], reference: 'different' }] })).status, 409);
+  const monthlyRetry = await post('/monthly/commit', monthlyBody);
+  assert.equal(monthlyRetry.status, 201);
+  assert.deepEqual(await monthlyRetry.json(), { saved: 2, alreadySaved: 1 });
+  assert.deepEqual(manualRows.map((row) => payments.find((payment) => String(payment._id) === row.id).amountCents), [2000, 2500, 2000]);
+  const extra = [{ ...makeRow(500), method: 'cash', reference: '', reportingMonth: '2027-01' }];
+  const duplicateReview = await (await post('/monthly/check', { rows: extra })).json();
+  assert.deepEqual(duplicateReview.conflicts[extra[0].id], [manualRows[0].id]);
+  assert.equal((await post('/monthly/commit', { rows: extra, acknowledged: duplicateReview.conflicts, confirmedDuplicates: [] })).status, 409);
+  assert.equal((await post('/monthly/commit', { rows: extra, acknowledged: duplicateReview.conflicts, confirmedDuplicates: [extra[0].id] })).status, 201);
 });
 
 test('only finance can edit imported dates, preserving the reporting month and an audit record', async (t) => {

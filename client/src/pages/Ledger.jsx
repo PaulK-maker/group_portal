@@ -3,6 +3,7 @@ import { api, money, toCents, fmtDate, METHOD_LABELS } from '../api.js';
 import { useAuth } from '../context/AuthContext.jsx';
 import ProofUpload from '../components/ProofUpload.jsx';
 import ContributionImport from '../components/ContributionImport.jsx';
+import MonthlyPayments from '../components/MonthlyPayments.jsx';
 
 const today = () => new Date().toISOString().slice(0, 10);
 
@@ -109,6 +110,8 @@ export default function Ledger() {
 
       <ProofUpload />
 
+      {isFinance && <MonthlyPayments key={groupId} groupId={groupId} members={members} categories={categories} onSaved={load} />}
+
       {isFinance && <ContributionImport key={groupId} groupId={groupId} members={members} categories={categories} onImported={load} />}
 
       <section className="card">
@@ -140,7 +143,7 @@ export default function Ledger() {
           <tbody>
             {rows.map((c) => (
               <tr key={c._id} className={c.voided ? 'voided' : ''}>
-                <td>{c.source === 'import' ? c.date.slice(0, 10) : fmtDate(c.date)}{c.reportingMonth && <div className="small muted">Reporting: {c.reportingMonth}</div>}</td>
+                <td>{c.source === 'import' || (c.source === 'manual' && c.reportingMonth) ? c.date.slice(0, 10) : fmtDate(c.date)}{c.reportingMonth && <div className="small muted">Reporting: {c.reportingMonth}</div>}</td>
                 <td>{c.memberName}</td>
                 <td><strong>{money(c.amountCents)}</strong></td>
                 <td>{METHOD_LABELS[c.method]}{c.source === 'email' && <span className="tag">email</span>}</td>

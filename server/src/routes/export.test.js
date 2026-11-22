@@ -83,4 +83,11 @@ test('exports fresh monthly category details alongside the complete ledger', asy
   const imported = historical.getRows(2, historical.rowCount - 1).find((row) => row.getCell(8).value === 'Imported');
   assert.equal(imported.getCell(1).value, '2025-01');
   assert.equal(imported.getCell(3).value.toISOString().slice(0, 10), '2026-11-13');
+
+  payments.push({ ...payment(2000, 'Dues', 'cash', 'Advance'), reportingMonth: '2027-01' });
+  const future = (await download('Dues')).getWorksheet('Monthly report');
+  const advance = future.getRows(2, future.rowCount - 1).find((row) => row.getCell(8).value === 'Advance');
+  assert.equal(advance.getCell(1).value, '2027-01');
+  assert.equal(advance.getCell(3).value.toISOString().slice(0, 10), '2026-11-13');
+  assert.equal(advance.getCell(5).value, 20);
 });

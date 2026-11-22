@@ -65,6 +65,7 @@ tr.voided td { text-decoration: line-through; }
 .import-payment summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; }
 .import-payment summary > span { min-width: 0; overflow-wrap: anywhere; }
 .import-payment-details .form-row > label { min-width: 0; }
+.month-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
 
 .list { list-style: none; margin: 8px 0; padding: 0; }
 .list li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }

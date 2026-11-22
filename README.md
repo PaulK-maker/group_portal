@@ -8,6 +8,7 @@ Treasurer and member portal for small groups: a church men's group today, any cl
 - **Official**: announcements, meeting minutes and events, attributed to the sender's assigned role
 - **Excel export**: Summary and full Ledger sheets, plus a monthly report for the selected payment category
 - **Excel import**: finance users can map and review member-by-month or one-payment-per-row spreadsheets before adding payments
+- **Monthly payment entry**: finance users can choose a member and past or future months, enter matching or different amounts, and review possible duplicates before saving
 
 MERN: MongoDB, Express, React (Vite), Node 18+.
 
@@ -111,6 +112,12 @@ Contribution (source: email)  →  progress bars, totals, Excel export
 ```
 
 Manual entry goes straight to Contribution (source: manual). Money records are never deleted, only **voided with a reason**, so the audit trail stays intact.
+
+### Recording payments by month
+
+On the Ledger page, choose an active member under **Record payments by month**, select the months paid (including months in different years), and enter an amount for each. An amount can be applied to all selected months and adjusted individually. Enter the actual date received; use separate batches if the payments were received on different dates. Review the member, amounts, total and any possible duplicates before saving. Each month becomes a separate ledger payment, with its reporting month independent of its payment date. Record only amounts actually received; the entries add to the ledger total. If saving is interrupted, check the ledger and retry the same review rather than starting a new one.
+
+The database is the main record. Use **Export to Excel** to download an updated Pamo-Ledger report; the app does not automatically update an original uploaded workbook.
 
 ### Importing contributions from Excel
 

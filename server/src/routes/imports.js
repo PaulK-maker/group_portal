@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import ExcelJS from 'exceljs';
 import mongoose from 'mongoose';
-import Contribution from '../models/Contribution.js';
+import Contribution, { METHODS } from '../models/Contribution.js';
 import Membership, { FINANCE_ROLES } from '../models/Membership.js';
 import { requireAuth, loadUser, loadMembership, requireRole } from '../middleware/auth.js';
 import { ah, httpError } from '../utils/asyncHandler.js';
@@ -73,7 +73,7 @@ function parseDate(date) {
   return parsed;
 }
 
-async function validateRows(req) {
+async function validateRows(req, source = 'import') {
   const { rows } = req.body;
   if (!Array.isArray(rows) || !rows.length || rows.length > MAX_ROWS) throw httpError(400, `Choose 1 to ${MAX_ROWS} payments`);
   const ids = new Set();
@@ -87,6 +87,10 @@ async function validateRows(req) {
     if (typeof row.reportingMonth !== 'string' || !monthFormat.test(row.reportingMonth)) throw httpError(400, 'Every payment needs a reporting month');
     if (!req.group.settings.categories.includes(row.category)) throw httpError(400, 'Choose a valid group category');
     if (row.memo !== undefined && (typeof row.memo !== 'string' || row.memo.length > 200)) throw httpError(400, 'Memo must be at most 200 characters');
+    if (source === 'manual' && !METHODS.includes(row.method)) throw httpError(400, 'Choose a valid payment method');
+    if (source === 'manual' && row.reference !== undefined && (typeof row.reference !== 'string' || row.reference.length > 200)) {
+      throw httpError(400, 'Reference must be at most 200 characters');
+    }
     return {
       _id: new mongoose.Types.ObjectId(row.id),
       group: req.group._id,
@@ -96,8 +100,9 @@ async function validateRows(req) {
       reportingMonth: row.reportingMonth,
       category: row.category,
       memo: (row.memo || '').trim(),
-      method: 'other',
-      source: 'import',
+      method: source === 'manual' ? row.method : 'other',
+      ...(source === 'manual' ? { reference: (row.reference || '').trim() } : {}),
+      source,
       enteredBy: req.userId,
     };
   });
@@ -108,15 +113,16 @@ async function validateRows(req) {
 
 const duplicateKey = (row) => `${row.membership}|${row.category}|${row.reportingMonth || row.date.toISOString().slice(0, 7)}`;
 
-function sameImportedPayment(existing, candidate) {
+function samePayment(existing, candidate) {
   return String(existing.group) === String(candidate.group) &&
     String(existing.enteredBy) === String(candidate.enteredBy) &&
     String(existing.membership) === String(candidate.membership) &&
-    existing.source === 'import' && !existing.voided &&
+    existing.source === candidate.source && !existing.voided &&
     existing.amountCents === candidate.amountCents &&
     existing.date.getTime() === candidate.date.getTime() &&
     existing.reportingMonth === candidate.reportingMonth &&
-    existing.category === candidate.category && (existing.memo || '') === candidate.memo && existing.method === candidate.method;
+    existing.category === candidate.category && (existing.memo || '') === candidate.memo && existing.method === candidate.method &&
+    (existing.reference || '') === (candidate.reference || '');
 }
 
 async function inspectRows(req, rows) {
@@ -129,7 +135,7 @@ async function inspectRows(req, rows) {
   const requested = new Map(rows.map((row) => [String(row._id), row]));
   for (const payment of byId) {
     const candidate = requested.get(String(payment._id));
-    if (!candidate || !sameImportedPayment(payment, candidate)) throw httpError(409, 'An import row was already used for a different payment. Start a new import.');
+    if (!candidate || !samePayment(payment, candidate)) throw httpError(409, 'A payment ID was already used for a different payment. Start a new review.');
     saved.add(String(payment._id));
   }
   const groups = new Map();
@@ -157,13 +163,13 @@ async function inspectRows(req, rows) {
   return { conflicts, details, alreadySaved: [...saved] };
 }
 
-router.post('/check', ah(async (req, res) => {
-  const rows = await validateRows(req);
+const check = (source) => ah(async (req, res) => {
+  const rows = await validateRows(req, source);
   res.json(await inspectRows(req, rows));
-}));
+});
 
-router.post('/commit', ah(async (req, res) => {
-  const rows = await validateRows(req);
+const commit = (source) => ah(async (req, res) => {
+  const rows = await validateRows(req, source);
   const acknowledged = req.body.acknowledged;
   const confirmed = req.body.confirmedDuplicates;
   if (!acknowledged || typeof acknowledged !== 'object' || Array.isArray(acknowledged)) throw httpError(400, 'Review the payments before importing');
@@ -194,11 +200,16 @@ router.post('/commit', ah(async (req, res) => {
       await Contribution.create(row);
       saved += 1;
     } catch (err) {
-      console.error('Excel import stopped:', err);
-      return res.status(500).json({ error: `Import stopped after confirming ${saved} new payments saved; another may also have saved. Review the ledger and retry this same preview; previously saved rows will not be added again.` });
+      console.error('Payment batch stopped:', err);
+      return res.status(500).json({ error: `Payment batch stopped after confirming ${saved} new payments saved; another may also have saved. Review the ledger and retry this same preview; previously saved rows will not be added again.` });
     }
   }
   res.status(201).json({ saved, alreadySaved: state.alreadySaved.length });
-}));
+});
+
+router.post('/check', check('import'));
+router.post('/commit', commit('import'));
+router.post('/monthly/check', check('manual'));
+router.post('/monthly/commit', commit('manual'));
 
 export default router;
