@@ -4,7 +4,7 @@ const BASE = '/api';
 
 export const getToken = getClerkToken;
 
-export async function api(path, { method = 'GET', body, raw, token: providedToken } = {}) {
+export async function api(path, { method = 'GET', body, raw, token: providedToken, signal } = {}) {
   const token = providedToken === undefined ? await getClerkToken() : providedToken;
   const res = await fetch(BASE + path, {
     method,
@@ -13,6 +13,7 @@ export async function api(path, { method = 'GET', body, raw, token: providedToke
       ...(token && { Authorization: `Bearer ${token}` }),
     },
     body: body ? JSON.stringify(body) : undefined,
+    signal,
   });
   if (raw) {
     if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || res.statusText);

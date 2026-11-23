@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { api, money, METHOD_LABELS } from '../api.js';
 import { amountInCents, dateFromCell } from './contributionImportData.js';
+import { selectedMonthlyAmounts } from './monthlyPaymentData.js';
 
 const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const today = () => {
@@ -8,6 +9,22 @@ const today = () => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
 const makeId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((n) => n.toString(16).padStart(2, '0')).join('');
+
+async function requestMonthly(path, body, timeoutMessage) {
+  const controller = new AbortController();
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+      controller.abort();
+    }, 30000);
+  });
+  try {
+    return await Promise.race([api(path, { method: 'POST', body, signal: controller.signal }), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export default function MonthlyPayments({ groupId, members, categories, onSaved }) {
   const [memberId, setMemberId] = useState('');
@@ -24,11 +41,18 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
   const [approved, setApproved] = useState({});
   const [confirmed, setConfirmed] = useState(false);
   const [attempted, setAttempted] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
+  const errorRef = useRef(null);
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
   const member = members.find((item) => item.id === memberId);
-  const selections = Object.entries(selected).sort(([a], [b]) => a.localeCompare(b));
+  const selections = selectedMonthlyAmounts(selected, amount);
+  const cents = selections.map(([, value]) => amountInCents(value));
+  const total = cents.reduce((sum, value) => sum + (Number.isSafeInteger(value) ? value : 0), 0);
+  const totalIsValid = cents.length > 0 && cents.every((value) => Number.isSafeInteger(value) && value > 0) && Number.isSafeInteger(total);
   const validYear = /^\d{4}$/.test(year) && Number(year) >= 1000;
 
   const check = async (payments) => {
@@ -36,11 +60,12 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
     setReview(null);
     setApproved({});
     setConfirmed(false);
-    setBusy(true);
+    setBusy('checking');
     try {
-      setReview(await api(`/groups/${groupId}/imports/monthly/check`, { method: 'POST', body: { rows: payments } }));
+      setReview(await requestMonthly(`/groups/${groupId}/imports/monthly/check`, { rows: payments },
+        'The duplicate check took too long. No payments were saved. Try Check again.'));
     } catch (err) { setError(err.message); }
-    finally { setBusy(false); }
+    finally { setBusy(''); }
   };
 
   const startReview = () => {
@@ -67,20 +92,23 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
     if (rows.some((row) => review.conflicts[row.id].length && !approved[row.id])) {
       return setError('Confirm each month with an existing payment, or go back and remove it.');
     }
-    setBusy(true);
+    setBusy('saving');
     setAttempted(true);
     try {
-      const result = await api(`/groups/${groupId}/imports/monthly/commit`, {
-        method: 'POST', body: { rows, acknowledged: review.conflicts, confirmedDuplicates: Object.keys(approved).filter((id) => approved[id]) },
-      });
+      const result = await requestMonthly(`/groups/${groupId}/imports/monthly/commit`,
+        { rows, acknowledged: review.conflicts, confirmedDuplicates: Object.keys(approved).filter((id) => approved[id]) },
+        'The request timed out.');
       setMessage(`Saved ${result.saved} payment(s).${result.alreadySaved ? ` ${result.alreadySaved} previously saved payment(s) were not added again.` : ''}`);
       setRows(null);
       setReview(null);
       setSelected({});
       setAttempted(false);
       onSaved();
-    } catch (err) { setError(err.message); }
-    finally { setBusy(false); }
+    } catch (err) {
+      setError(`Saving did not finish: ${err.message} Some payments may have been saved. Check the ledger, then retry this same review; do not start a new one.`);
+      onSaved();
+    }
+    finally { setBusy(''); }
   };
 
   const back = () => {
@@ -91,10 +119,10 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
   };
 
   return <section className="card">
-    <fieldset disabled={busy} className="import-controls stack">
+    <fieldset disabled={!!busy} aria-busy={!!busy} className="import-controls stack">
       <h2>Record payments by month</h2>
       <p className="small muted">Choose a member and the months already paid, including advance payments. Each month is saved as a separate ledger payment.</p>
-      {error && <p className="error" role="alert">{error}</p>}
+      {error && <p className="error" role="alert" tabIndex="-1" ref={errorRef}>{error}</p>}
       {message && <p role="status">{message}</p>}
       {!rows ? <>
         <label>1. Choose a member
@@ -109,26 +137,35 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
         </label>
         {member && <>
           <h3>2. Choose the months and amounts</h3>
-          <p className="small muted">Choose any past or future months. Change the year to select months in another year; your selections will stay.</p>
+          <p className="small muted">Choose the months paid and enter the amount for each month. Change the year to select months in another year; your selections will stay.</p>
           <div className="form-row">
             <label>Year<input type="number" min="1000" max="9999" value={year} onChange={(event) => setYear(event.target.value)} /></label>
-            <label>Amount per month ($)<input type="text" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
+            <label>Same amount per month ($)<input type="text" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
           </div>
-          <div><button type="button" className="secondary" onClick={() => {
-            const cents = amountInCents(amount);
-            if (!Number.isSafeInteger(cents) || cents < 1) return setError('Enter a valid amount greater than zero first.');
-            if (!selections.length) return setError('Choose at least one month first.');
-            setSelected(Object.fromEntries(selections.map(([month]) => [month, amount])));
-            setError('');
-          }}>Use this amount for all selected months</button></div>
+          <p className="small muted">This amount applies automatically to selected months, even if you enter it after choosing them. You can change individual amounts below.</p>
+          {!validYear && <p className="error">Enter a four-digit year to choose months.</p>}
+          <div className="actions">
+            <button type="button" className="secondary" disabled={!validYear} onClick={() => setSelected((previous) => {
+              const next = { ...previous };
+              months.forEach((month, index) => {
+                const key = `${year}-${String(index + 1).padStart(2, '0')}`;
+                if (!Object.hasOwn(next, key)) next[key] = null;
+              });
+              return next;
+            })}>Select all months in {validYear ? year : 'this year'}</button>
+            <button type="button" className="secondary" disabled={!validYear} onClick={() => setSelected((previous) =>
+              Object.fromEntries(Object.entries(previous).filter(([month]) => !month.startsWith(`${year}-`)))
+            )}>Clear {validYear ? year : 'this year'}</button>
+          </div>
           <div className="month-grid">
             {months.map((month, index) => {
               const key = `${year}-${String(index + 1).padStart(2, '0')}`;
-              return <label className="inline" key={month}>
+              return <label className={`inline month-choice${Object.hasOwn(selected, key) ? ' selected' : ''}`} key={month}>
                 <input type="checkbox" disabled={!validYear} checked={Object.hasOwn(selected, key)} onChange={(event) => {
+                  const checked = event.target.checked;
                   setSelected((previous) => {
                     const next = { ...previous };
-                    if (event.target.checked) next[key] = amount;
+                    if (checked) next[key] = null;
                     else delete next[key];
                     return next;
                   });
@@ -136,12 +173,22 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
               </label>;
             })}
           </div>
-          {selections.length > 0 && <div className="stack">
-            <p className="small">Adjust each month if the amounts differ:</p>
-            <div className="form-row">{selections.map(([month, value]) => <label key={month}>{month} amount ($)
-              <input type="text" inputMode="decimal" value={value} onChange={(event) => setSelected((previous) => ({ ...previous, [month]: event.target.value }))} />
-            </label>)}</div>
-          </div>}
+          <p className="small" role="status">{selections.length} {selections.length === 1 ? 'month' : 'months'} selected{totalIsValid ? ` · Total ${money(total)}` : ''}{selections.length > 0 ? `: ${selections.map(([month]) => month).join(', ')}` : ''}.</p>
+          {selections.length > 0 && <details className="import-options">
+            <summary>Some months have different amounts</summary>
+            <div className="stack">
+              <p className="small muted">Change only the months that differ. Other months use the same amount above.</p>
+              <div className="form-row">{selections.map(([month, value]) => <label key={month}>{month} amount ($)
+                <input type="text" inputMode="decimal" value={value} onChange={(event) => {
+                  const value = event.target.value;
+                  setSelected((previous) => ({ ...previous, [month]: value }));
+                }} />
+              </label>)}</div>
+              <div><button type="button" className="secondary" onClick={() => setSelected((previous) =>
+                Object.fromEntries(Object.keys(previous).map((month) => [month, null]))
+              )}>Use the same amount for all selected months</button></div>
+            </div>
+          </details>}
           <h3>3. Payment details</h3>
           <p className="small muted">Use the actual date received. If payments were received on different dates, record them in separate batches.</p>
           <div className="form-row">
@@ -152,9 +199,14 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
             <label>Category<select value={category} onChange={(event) => setCategory(event.target.value)}>
               {categories.map((item) => <option key={item}>{item}</option>)}
             </select></label>
-            <label>Reference #<input maxLength="200" value={reference} onChange={(event) => setReference(event.target.value)} /></label>
-            <label>Memo<input maxLength="200" value={memo} onChange={(event) => setMemo(event.target.value)} /></label>
           </div>
+          <details className="import-options">
+            <summary>Add a reference or note (optional)</summary>
+            <div className="form-row">
+              <label>Reference #<input maxLength="200" value={reference} onChange={(event) => setReference(event.target.value)} /></label>
+              <label>Memo<input maxLength="200" value={memo} onChange={(event) => setMemo(event.target.value)} /></label>
+            </div>
+          </details>
           <div><button type="button" onClick={startReview}>Review payments</button></div>
         </>}
       </> : <>
@@ -184,6 +236,7 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
           {review && <button type="button" onClick={save}>Save monthly payments</button>}
         </div>
       </>}
+      {busy && <p role="status" aria-live="polite">{busy === 'checking' ? 'Checking for possible duplicates…' : 'Saving payments… Please wait.'}</p>}
     </fieldset>
   </section>;
 }

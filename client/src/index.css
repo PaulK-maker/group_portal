@@ -66,6 +66,8 @@ tr.voided td { text-decoration: line-through; }
 .import-payment summary > span { min-width: 0; overflow-wrap: anywhere; }
 .import-payment-details .form-row > label { min-width: 0; }
 .month-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 8px; }
+.month-choice { border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 0; cursor: pointer; color: var(--ink); }
+.month-choice.selected { background: var(--accent-soft); border-color: var(--accent); }
 
 .list { list-style: none; margin: 8px 0; padding: 0; }
 .list li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; border-bottom: 1px solid var(--line); }
