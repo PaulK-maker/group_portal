@@ -24,6 +24,22 @@ export async function api(path, { method = 'GET', body, raw, token: providedToke
   return data;
 }
 
+export async function apiWithTimeout(path, options, timeoutMessage) {
+  const controller = new AbortController();
+  let timer;
+  const timeout = new Promise((resolve, reject) => {
+    timer = setTimeout(() => {
+      reject(new Error(timeoutMessage));
+      controller.abort();
+    }, 30000);
+  });
+  try {
+    return await Promise.race([api(path, { ...options, signal: controller.signal }), timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const money = (cents = 0) =>
   `$${(cents / 100).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 

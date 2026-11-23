@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { api, money, METHOD_LABELS } from '../api.js';
+import { apiWithTimeout, money, METHOD_LABELS } from '../api.js';
 import { amountInCents, dateFromCell } from './contributionImportData.js';
 import { selectedMonthlyAmounts } from './monthlyPaymentData.js';
 
@@ -9,22 +9,6 @@ const today = () => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
 const makeId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((n) => n.toString(16).padStart(2, '0')).join('');
-
-async function requestMonthly(path, body, timeoutMessage) {
-  const controller = new AbortController();
-  let timer;
-  const timeout = new Promise((resolve, reject) => {
-    timer = setTimeout(() => {
-      reject(new Error(timeoutMessage));
-      controller.abort();
-    }, 30000);
-  });
-  try {
-    return await Promise.race([api(path, { method: 'POST', body, signal: controller.signal }), timeout]);
-  } finally {
-    clearTimeout(timer);
-  }
-}
 
 export default function MonthlyPayments({ groupId, members, categories, onSaved }) {
   const [memberId, setMemberId] = useState('');
@@ -62,7 +46,7 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
     setConfirmed(false);
     setBusy('checking');
     try {
-      setReview(await requestMonthly(`/groups/${groupId}/imports/monthly/check`, { rows: payments },
+      setReview(await apiWithTimeout(`/groups/${groupId}/imports/monthly/check`, { method: 'POST', body: { rows: payments } },
         'The duplicate check took too long. No payments were saved. Try Check again.'));
     } catch (err) { setError(err.message); }
     finally { setBusy(''); }
@@ -95,8 +79,8 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
     setBusy('saving');
     setAttempted(true);
     try {
-      const result = await requestMonthly(`/groups/${groupId}/imports/monthly/commit`,
-        { rows, acknowledged: review.conflicts, confirmedDuplicates: Object.keys(approved).filter((id) => approved[id]) },
+      const result = await apiWithTimeout(`/groups/${groupId}/imports/monthly/commit`,
+        { method: 'POST', body: { rows, acknowledged: review.conflicts, confirmedDuplicates: Object.keys(approved).filter((id) => approved[id]) } },
         'The request timed out.');
       setMessage(`Saved ${result.saved} payment(s).${result.alreadySaved ? ` ${result.alreadySaved} previously saved payment(s) were not added again.` : ''}`);
       setRows(null);

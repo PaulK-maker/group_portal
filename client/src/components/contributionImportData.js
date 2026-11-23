@@ -70,7 +70,7 @@ export function dateFromCell(value, format = '') {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === iso ? iso : '';
 }
 
-export function makeImportRows({ sheet, headerRow, layout, nameColumn, amountColumn, dateColumn, dateFormat = '', categoryColumn, memoColumn = '', voidedColumn = '', columns, year, defaultDate, defaultCategory, categories, members, makeId }) {
+export function makeImportRows({ sheet, headerRow, firstDataRow = headerRow + 1, layout, nameColumn, amountColumn, dateColumn, dateFormat = '', categoryColumn, memoColumn = '', voidedColumn = '', columns, year, defaultDate, defaultCategory, categories, members, makeId }) {
   const results = [];
   const append = (rowIndex, columnIndex, rawAmount, category, date, reportingMonth, memo, originalDate = '', originalCategory = '', excludedReason = '') => {
     const cents = amountInCents(rawAmount);
@@ -93,13 +93,13 @@ export function makeImportRows({ sheet, headerRow, layout, nameColumn, amountCol
       selected: !excludedReason,
     });
   };
-  for (let r = headerRow; r < sheet.rows.length; r += 1) {
+  for (let r = firstDataRow - 1; r < sheet.rows.length; r += 1) {
     const row = sheet.rows[r];
     if (layout === 'matrix') {
       columns.forEach((column, i) => {
         if (!column.kind) return;
         const month = column.kind === 'other' ? defaultDate.slice(0, 7) : `${year}-${column.kind}`;
-        const memo = column.kind === 'other' ? (column.note || String(sheet.rows[headerRow - 1][i] ?? '').trim()) : '';
+        const memo = column.kind === 'other' ? (column.note || String(sheet.rows[headerRow - 1]?.[i] ?? '').trim()) : '';
         append(r, i, row[i], column.category, defaultDate, month, memo);
       });
     } else {

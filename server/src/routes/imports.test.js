@@ -93,6 +93,20 @@ test('workbook upload, duplicate confirmation, tenant guard and safe retry after
   const matrixRow = (await matrixResponse.json()).sheets[0].rows[1];
   assert.deepEqual([matrixRow[2], matrixRow[3], matrixRow[14], matrixRow[15], matrixRow[16]], ['Example Member', 50, 50, 150, 750]);
   assert.deepEqual(matrixRow.slice(3, 15), Array(12).fill(50));
+
+  const example = new ExcelJS.Workbook();
+  const exampleSheet = example.addWorksheet('Sheet1');
+  exampleSheet.getCell('C2').value = 77;
+  exampleSheet.getCell('D2').value = 'FEB';
+  exampleSheet.getCell('B3').value = 'Example Member';
+  for (let column = 3; column <= 14; column += 1) exampleSheet.getRow(3).getCell(column).value = 50;
+  exampleSheet.getCell('O3').value = 150;
+  exampleSheet.getCell('P3').value = { formula: 'SUM(C3:O3)', result: 750 };
+  const exampleResponse = await post('/workbook', { data: Buffer.from(await example.xlsx.writeBuffer()).toString('base64') });
+  assert.equal(exampleResponse.status, 200);
+  const exampleRow = (await exampleResponse.json()).sheets[0].rows[2];
+  assert.deepEqual([exampleRow[1], ...exampleRow.slice(2, 14), exampleRow[14], exampleRow[15]],
+    ['Example Member', ...Array(12).fill(50), 150, 750]);
   assert.equal((await post('/workbook', { data: Buffer.from('not xlsx').toString('base64') })).status, 400);
   role = 'member';
   assert.equal((await post('/workbook', { data: encoded })).status, 403);

@@ -55,6 +55,42 @@ test('maps an unlabeled monthly sheet without importing totals or changing 50 do
   assert.throws(() => assignSpecialColumn(months, headers, 3, 2, 'Other', 'Special'));
 });
 
+test('imports the first data row when a sheet has no headings', () => {
+  const sheet = { rows: [
+    ['Example Member', 50, 50, 100],
+    ['Another Member', 50, '', 50],
+  ] };
+  const rows = makeImportRows({
+    sheet, headerRow: 0, firstDataRow: 1, layout: 'matrix', nameColumn: 0,
+    columns: [{ kind: '' }, { kind: '01', category: 'Dues' }, { kind: '02', category: 'Dues' }, { kind: '' }],
+    year: '2026', defaultDate: '2026-11-20', defaultCategory: 'Dues', categories: ['Dues'],
+    members: [{ id: 'one', name: 'Example Member' }, { id: 'two', name: 'Another Member' }], makeId: () => 'id',
+  });
+  assert.deepEqual(rows.map((row) => [row.membershipId, amountInCents(row.amount), row.reportingMonth]), [
+    ['one', 5000, '2026-01'], ['one', 5000, '2026-02'], ['two', 5000, '2026-01'],
+  ]);
+});
+
+test('starts after a later heading row and keeps the workbook monthly amounts', () => {
+  const sheet = { rows: [
+    Array(16).fill(''),
+    ['', 'Name', 77, 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec', 'Special', 'Total'],
+    [1, 'Example Member', ...Array(12).fill(50), 150, 750],
+  ] };
+  const empty = sheet.rows[1].map(() => ({ kind: '', category: 'Dues' }));
+  const months = assignMonthlyColumns(empty, sheet.rows[1], 2, 1, 'Dues');
+  const columns = assignSpecialColumn(months, sheet.rows[1], 14, 1, 'Other', 'Special');
+  const rows = makeImportRows({
+    sheet, headerRow: 2, firstDataRow: 3, layout: 'matrix', nameColumn: 1, columns,
+    year: '2026', defaultDate: '2026-11-20', defaultCategory: 'Dues', categories: ['Dues', 'Other'],
+    members: [{ id: 'one', name: 'Example Member' }], makeId: () => 'id',
+  });
+  assert.equal(rows.length, 13);
+  assert.deepEqual(rows.slice(0, 12).map((row) => amountInCents(row.amount)), Array(12).fill(5000));
+  assert.equal(amountInCents(rows[12].amount), 15000);
+  assert.equal(rows[0].origin, 'Row 3, column C');
+});
+
 test('maps per-payment dates and categories and leaves unknown values for review', () => {
   const rows = makeImportRows({
     sheet: { rows: [

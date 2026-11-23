@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { api, money } from '../api.js';
+import { useEffect, useRef, useState } from 'react';
+import { apiWithTimeout, money } from '../api.js';
 import {
   amountInCents, assignMemberToGroup, assignMonthlyColumns, assignSpecialColumn, columnLetter,
   dateFromCell, fillMissingDates, importIssues, makeImportRows, matchMember, unmatchedNameGroups,
@@ -17,6 +17,12 @@ const currentDate = () => {
 };
 const makeId = () => [...crypto.getRandomValues(new Uint8Array(12))].map((n) => n.toString(16).padStart(2, '0')).join('');
 const headerMatches = (header, pattern) => pattern.test(String(header ?? '').trim());
+const suggestedHeaderRow = (sheet) => {
+  const index = sheet.rows.slice(0, 10).findIndex((row) =>
+    row.filter((value) => monthHeaders.some((pattern) => pattern.test(String(value).trim().toLowerCase()))).length >= 2
+  );
+  return index < 0 ? 1 : index + 1;
+};
 
 function readFile(file) {
   return new Promise((resolve, reject) => {
@@ -32,6 +38,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
   const [fileName, setFileName] = useState('');
   const [sheetIndex, setSheetIndex] = useState(0);
   const [headerRow, setHeaderRow] = useState(1);
+  const [firstDataRow, setFirstDataRow] = useState(2);
   const [layout, setLayout] = useState('matrix');
   const [nameColumn, setNameColumn] = useState('');
   const [amountColumn, setAmountColumn] = useState('');
@@ -52,18 +59,23 @@ export default function ContributionImport({ groupId, members, categories, onImp
   const [bulkCategory, setBulkCategory] = useState(categories[0]);
   const [rows, setRows] = useState(null);
   const [review, setReview] = useState(null);
-  const [approved, setApproved] = useState({});
   const [sourceReviewed, setSourceReviewed] = useState(false);
   const [commitAttempted, setCommitAttempted] = useState(false);
   const [error, setError] = useState('');
   const [message, setMessage] = useState('');
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState('');
+  const errorRef = useRef(null);
+  useEffect(() => {
+    if (error) errorRef.current?.focus();
+  }, [error]);
   const sheet = sheets[sheetIndex];
-  const headers = sheet?.rows[headerRow - 1] || [];
+  const headers = headerRow === 0
+    ? Array(sheet?.rows[0]?.length || 0).fill('')
+    : sheet?.rows[headerRow - 1] || [];
 
   useEffect(() => {
     if (!sheet) return;
-    const row = sheet.rows[headerRow - 1] || [];
+    const row = headerRow === 0 ? Array(sheet.rows[0]?.length || 0).fill('') : sheet.rows[headerRow - 1] || [];
     const find = (pattern) => {
       const index = row.findIndex((value) => headerMatches(value, pattern));
       return index < 0 ? '' : String(index);
@@ -90,6 +102,13 @@ export default function ContributionImport({ groupId, members, categories, onImp
     }));
   }, [sheet, headerRow, categories]);
 
+  const chooseSheet = (index, availableSheets = sheets) => {
+    setSheetIndex(index);
+    const heading = index < 0 ? 1 : suggestedHeaderRow(availableSheets[index]);
+    setHeaderRow(heading);
+    setFirstDataRow(heading + 1);
+  };
+
   const upload = async (event) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -100,23 +119,23 @@ export default function ContributionImport({ groupId, members, categories, onImp
       setError('Choose a non-empty Excel file ending in .xlsx, no larger than 750 KB.');
       return;
     }
-    setBusy(true);
+    setBusy('reading');
     try {
-      const result = await api(`/groups/${groupId}/imports/workbook`, { method: 'POST', body: { data: await readFile(file) } });
+      const result = await apiWithTimeout(`/groups/${groupId}/imports/workbook`, { method: 'POST', body: { data: await readFile(file) } },
+        'Reading the file took too long. No payments were saved. Try again.');
       setSheets(result.sheets);
       setFileName(file.name);
-      setSheetIndex(result.sheets.length === 1 ? 0 : -1);
-      setHeaderRow(1);
+      chooseSheet(result.sheets.length === 1 ? 0 : -1, result.sheets);
       setRows(null);
       setReview(null);
       setSourceReviewed(false);
       setCommitAttempted(false);
     } catch (err) { setError(err.message); }
-    finally { setBusy(false); }
+    finally { setBusy(''); }
   };
 
   const columnDescription = (header, i) => {
-    const example = sheet?.rows.slice(headerRow).map((row) => row[i]).find((value) => value !== '' && value != null);
+    const example = sheet?.rows.slice(Math.max(0, firstDataRow - 1)).map((row) => row[i]).find((value) => value !== '' && value != null);
     return `Column ${columnLetter(i)}: ${String(header || '(blank heading)')}${example == null ? '' : ` — example: ${String(example).slice(0, 60)}`}`;
   };
   const options = headers.map((header, i) => <option key={i} value={String(i)}>{columnDescription(header, i)}</option>);
@@ -132,7 +151,6 @@ export default function ContributionImport({ groupId, members, categories, onImp
   const updateRows = (update) => {
     setRows(update);
     setReview(null);
-    setApproved({});
     setSourceReviewed(false);
     setError('');
   };
@@ -142,6 +160,8 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setError('');
     setMessage('');
     if (!sheet || nameColumn === '' || !dateFromCell(defaultDate)) return setError('Choose the column with member names and a valid date to use when dates are missing.');
+    if (!Number.isInteger(firstDataRow) || firstDataRow < 1 || firstDataRow > sheet.rows.length) return setError('Choose the first row containing payments.');
+    if (headerRow > 0 && firstDataRow <= headerRow) return setError('The first payment row must be after the heading row, or choose “No headings”.');
     if (layout === 'matrix') {
       if (!columns.some((column) => column.kind)) return setError('Open “Change column choices” and choose at least one payment column.');
       if (columns.some((column) => column.kind && column.kind !== 'other') && !/^\d{4}$/.test(year)) return setError('Enter the year that the month columns refer to.');
@@ -149,7 +169,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
     } else if (amountColumn === '' || amountColumn === nameColumn) return setError('Choose different columns for member names and payment amounts.');
     const voidedIndex = headers.findIndex((header) => headerMatches(header, /^voided$/i));
     const result = makeImportRows({
-      sheet, headerRow, layout, nameColumn: Number(nameColumn), amountColumn: Number(amountColumn),
+      sheet, headerRow, firstDataRow, layout, nameColumn: Number(nameColumn), amountColumn: Number(amountColumn),
       dateColumn: dateColumn === '' ? '' : Number(dateColumn), dateFormat,
       categoryColumn: categoryColumn === '' ? '' : Number(categoryColumn),
       memoColumn: memoColumn === '' ? '' : Number(memoColumn),
@@ -160,7 +180,6 @@ export default function ContributionImport({ groupId, members, categories, onImp
     if (result.length > 1000) return setError('This selection has more than 1,000 payments. Split the file into smaller imports.');
     setRows(result);
     setReview(null);
-    setApproved({});
     setSourceReviewed(false);
     setCommitAttempted(false);
   };
@@ -181,36 +200,40 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setError('');
     setMessage('');
     setReview(null);
-    setApproved({});
     setSourceReviewed(false);
     try {
       const payload = selectedPayload();
-      setBusy(true);
-      const result = await api(`/groups/${groupId}/imports/check`, { method: 'POST', body: { rows: payload } });
+      setBusy('checking');
+      const result = await apiWithTimeout(`/groups/${groupId}/imports/check`, { method: 'POST', body: { rows: payload } },
+        'The duplicate check took too long. No payments were saved. Try again.');
       setReview(result);
     } catch (err) { setError(err.message); }
-    finally { setBusy(false); }
+    finally { setBusy(''); }
   };
 
   const commit = async () => {
     setError('');
     setMessage('');
+    let started = false;
     try {
       const payload = selectedPayload();
       if (!sourceReviewed) throw new Error('Confirm that you checked the names and amounts before importing.');
-      if (payload.some((row) => review.conflicts[row.id].length && !approved[row.id])) throw new Error('Open each possible duplicate and choose “Include this payment anyway”, or leave it out and check again.');
-      setBusy(true);
+      setBusy('saving');
       setCommitAttempted(true);
-      const result = await api(`/groups/${groupId}/imports/commit`, {
-        method: 'POST', body: { rows: payload, acknowledged: review.conflicts, confirmedDuplicates: Object.keys(approved).filter((id) => approved[id]) },
-      });
+      started = true;
+      const result = await apiWithTimeout(`/groups/${groupId}/imports/commit`, {
+        method: 'POST', body: { rows: payload, acknowledged: review.conflicts, confirmedDuplicates: payload.filter((row) => review.conflicts[row.id].length).map((row) => row.id) },
+      }, 'The request timed out.');
       setMessage(`Imported ${result.saved} payment(s). ${result.alreadySaved ? `${result.alreadySaved} previously saved payment(s) were not added again.` : ''}`);
       setRows(null);
       setReview(null);
       setCommitAttempted(false);
       onImported();
-    } catch (err) { setError(err.message); }
-    finally { setBusy(false); }
+    } catch (err) {
+      setError(started ? `Import did not finish: ${err.message} Some payments may have been saved. Check the ledger, then check for duplicates and retry this same review.` : err.message);
+      if (started) onImported();
+    }
+    finally { setBusy(''); }
   };
 
   const backToSettings = () => {
@@ -229,16 +252,16 @@ export default function ContributionImport({ groupId, members, categories, onImp
   const voidedIncluded = rows?.filter((row) => row.excludedReason && row.selected).length || 0;
   const duplicateCount = review ? selected.filter((row) => review.conflicts[row.id]?.length).length : 0;
   const hasWrittenDates = layout === 'payments' && dateColumn !== '' &&
-    sheet?.rows.slice(headerRow).some((row) => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(row[Number(dateColumn)] ?? '').trim()));
+    sheet?.rows.slice(Math.max(0, firstDataRow - 1)).some((row) => /^\d{1,2}\/\d{1,2}\/\d{4}$/.test(String(row[Number(dateColumn)] ?? '').trim()));
   const selectedColumns = columns.map((column, i) => column.kind
     ? `${columnLetter(i)}: ${column.kind === 'other' ? (column.note || headers[i] || 'extra payment') : months[Number(column.kind) - 1]} (${column.category})` : '').filter(Boolean);
 
   return (
     <section className="card">
-      <fieldset disabled={busy} className="import-controls stack">
+      <fieldset disabled={!!busy} aria-busy={!!busy} className="import-controls stack">
         <h2>Bring in payments from Excel</h2>
         <p className="small muted">Choose your file, check what we found, then review possible duplicates. Nothing is saved until you choose Import.</p>
-        {error && <p className="error" role="alert">{error}</p>}
+        {error && <p className="error" role="alert" tabIndex="-1" ref={errorRef}>{error}</p>}
         {message && <p role="status">{message}</p>}
 
         {!rows && <>
@@ -250,8 +273,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
             {fileName && <p className="small">File loaded: <strong>{fileName}</strong></p>}
             {sheets.length > 1 && <label>Which sheet has the payments?
               <select value={sheetIndex < 0 ? '' : sheetIndex} onChange={(event) => {
-                setSheetIndex(event.target.value === '' ? -1 : Number(event.target.value));
-                setHeaderRow(1);
+                chooseSheet(event.target.value === '' ? -1 : Number(event.target.value));
               }}>
                 <option value="">Choose a sheet</option>
                 {sheets.map((item, i) => <option key={i} value={i}>{item.name}</option>)}
@@ -264,6 +286,32 @@ export default function ContributionImport({ groupId, members, categories, onImp
             <div>
               <h3>2. Tell us about your file</h3>
               <p className="small muted">We suggest column choices below. Check them before continuing. Totals should not be imported as payments.</p>
+            </div>
+            <label className="inline"><input type="checkbox" checked={headerRow === 0} onChange={(event) => {
+              const heading = event.target.checked ? 0 : suggestedHeaderRow(sheet);
+              setHeaderRow(heading);
+              setFirstDataRow(heading + 1);
+            }} /> My sheet has no column headings</label>
+            <div className="form-row">
+              {headerRow !== 0 && <label>Row with column headings
+                <input type="number" min="1" max={sheet.rows.length} value={headerRow} onChange={(event) => {
+                  const heading = Number(event.target.value);
+                  setHeaderRow(heading);
+                  if (heading >= 1) setFirstDataRow(heading + 1);
+                }} />
+              </label>}
+              <label>First row with member payments
+                <input type="number" min="1" max={sheet.rows.length} value={firstDataRow} onChange={(event) => setFirstDataRow(Number(event.target.value))} />
+              </label>
+            </div>
+            <div className="stack">
+              <p className="small">First rows from your sheet. Check the names and amounts here before selecting columns; totals are not individual payments.</p>
+              <div className="import-source-table"><table>
+                <thead><tr><th>Row</th>{headers.map((header, i) => <th key={i}>{columnLetter(i)}</th>)}</tr></thead>
+                <tbody>{sheet.rows.slice(Math.max(0, firstDataRow - 1), Math.max(0, firstDataRow - 1) + 3).map((row, i) => <tr key={i}>
+                  <td>{firstDataRow + i}</td>{headers.map((header, column) => <td key={column}>{String(row[column] ?? '')}</td>)}
+                </tr>)}</tbody>
+              </table></div>
             </div>
             <div className="form-row">
               <label>How is your file arranged?
@@ -329,6 +377,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
                 } catch (err) { setError(err.message); }
               }}>Add extra payment column</button></div>
             </div>}
+            {busy && <p role="status" aria-live="polite">{busy === 'reading' ? 'Reading the file…' : busy === 'checking' ? 'Checking for possible duplicates…' : 'Importing payments… Please wait.'}</p>}
             {layout === 'matrix' && <p className="small">
               <strong>Payment columns selected:</strong> {selectedColumns.length ? selectedColumns.join(', ') : 'None yet. Open the choices below to select them.'}
             </p>}
@@ -340,11 +389,8 @@ export default function ContributionImport({ groupId, members, categories, onImp
               ].filter(Boolean).join(', ') || 'no date, category or note column'}
             </p>}
             <details className="import-options">
-              <summary>Change column choices or heading row</summary>
+              <summary>Change individual column choices</summary>
               <div className="stack">
-                <label>Row containing the column headings
-                  <input type="number" min="1" max={sheet.rows.length} value={headerRow} onChange={(event) => setHeaderRow(Number(event.target.value))} />
-                </label>
                 {layout === 'payments' ? <div className="form-row">
                   {columnSelect('Payment date column', dateColumn, setDateColumn, true)}
                   {columnSelect('Category column', categoryColumn, setCategoryColumn, true)}
@@ -369,7 +415,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
                 </div>}
               </div>
             </details>
-            <div><button type="button" disabled={headerRow < 1 || headerRow > sheet.rows.length} onClick={preview}>Continue to payment review</button></div>
+            <div><button type="button" onClick={preview}>Continue to payment review</button></div>
           </div>}
         </>}
 
@@ -426,8 +472,17 @@ export default function ContributionImport({ groupId, members, categories, onImp
 
           {review && <div className="import-help">
             <h3>4. Review possible duplicates</h3>
-            <p>{duplicateCount ? `${duplicateCount} selected ${duplicateCount === 1 ? 'payment may' : 'payments may'} already be recorded. Open each one to compare it and decide what to do.` : 'No possible duplicates were found.'}</p>
+            <p>{duplicateCount ? `${duplicateCount} selected ${duplicateCount === 1 ? 'payment has' : 'payments have'} possible matches. They may be separate payments. Compare them before deciding.` : 'No possible duplicates were found.'}</p>
             {review.alreadySaved.length > 0 && <p className="small">Some payments in this preview were already saved. They will not be added again.</p>}
+            {duplicateCount > 0 && <details>
+              <summary>Compare possible matches for this sheet</summary>
+              <ul>{selected.filter((row) => review.conflicts[row.id]?.length).map((row) => <li key={row.id}>
+                {members.find((member) => member.id === row.membershipId)?.name || row.name} · {row.reportingMonth} · {money(amountInCents(row.amount))}
+                <ul>{review.conflicts[row.id].map((id) => <li key={id}>
+                  {review.details[id]?.source === 'import' && rows.some((item) => item.id === id) ? 'Also in this preview' : 'Already in the ledger'}: {money(review.details[id]?.amountCents)}, {review.details[id]?.date}
+                </li>)}</ul>
+              </li>)}</ul>
+            </details>}
             {duplicateCount > 0 && <button type="button" className="secondary" onClick={() => updateRows((previous) => previous.map((row) =>
               review.conflicts[row.id]?.length ? { ...row, selected: false } : row
             ))}>Leave out all possible duplicates</button>}
@@ -477,8 +532,6 @@ export default function ContributionImport({ groupId, members, categories, onImp
                       <ul>{conflicts.map((id) => <li key={id}>
                         {review.details[id]?.source === 'import' && rows.some((item) => item.id === id) ? 'Another payment in this preview' : 'Payment already in the ledger'}: {money(review.details[id]?.amountCents)}, {review.details[id]?.date}
                       </li>)}</ul>
-                      <label className="inline"><input type="checkbox" checked={!!approved[row.id]}
-                        onChange={(event) => setApproved({ ...approved, [row.id]: event.target.checked })} /> Include this payment anyway</label>
                     </div>}
                   </div>
                 </details>
@@ -487,7 +540,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
           </div>
           {review && <label className="inline">
             <input type="checkbox" checked={sourceReviewed} onChange={(event) => setSourceReviewed(event.target.checked)} />
-            I checked the names and amounts against the file, including who each payment will be saved under.
+            I checked the names and amounts against the file{duplicateCount > 0 ? ` and want to include the ${duplicateCount} payments with possible matches` : ''}.
           </label>}
           <div className="actions">
             <button type="button" className="secondary" onClick={backToSettings}>Back to file settings</button>
