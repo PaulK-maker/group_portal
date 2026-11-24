@@ -60,11 +60,17 @@ test('links a pre-added member by verified email and preserves memberships', asy
   });
   t.mock.method(Membership, 'find', (query) => {
     assert.equal(query.user, 'existing_user');
-    return { populate: async () => [{ _id: 'membership', role: 'member', group: { name: 'Group' } }] };
+    return { populate: async () => [{ _id: 'membership', role: 'member', group: {
+      toObject: () => ({ name: 'Group', settings: { categories: ['Dues', 'Event'] } }),
+    } }] };
   });
   const response = await fetch(await startApp(t));
   assert.equal(response.status, 200);
-  assert.equal((await response.json()).memberships.length, 1);
+  const { memberships } = await response.json();
+  assert.equal(memberships.length, 1);
+  assert.deepEqual(memberships[0].group.settings.categories, [
+    'Dues', 'Event', 'Monthly contribution', 'One-time special contribution',
+  ]);
 });
 
 test('does not link unverified or already linked identities', async (t) => {

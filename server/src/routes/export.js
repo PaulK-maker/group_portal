@@ -5,6 +5,7 @@ import Membership, { FINANCE_ROLES } from '../models/Membership.js';
 import { requireAuth, loadUser, loadMembership, requireRole } from '../middleware/auth.js';
 import { totalsByMembership } from '../services/totals.js';
 import { ah } from '../utils/asyncHandler.js';
+import { contributionCategories } from '../services/contributionCategories.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, loadUser, loadMembership, requireRole(...FINANCE_ROLES));
@@ -16,7 +17,7 @@ const methodLabels = {
 
 // Full Excel workbook: a Summary sheet (one row per member) + the Ledger.
 router.get('/', ah(async (req, res) => {
-  const categories = req.group.settings.categories;
+  const categories = contributionCategories(req.group.settings.categories);
   const defaultCategory = categories.includes('Dues') ? 'Dues' : categories[0];
   const category = req.query.category === undefined ? defaultCategory : req.query.category;
   if (typeof category !== 'string' || !categories.includes(category)) {

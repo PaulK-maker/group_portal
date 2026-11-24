@@ -4,6 +4,7 @@ import User from '../models/User.js';
 import Membership from '../models/Membership.js';
 import { requireAuth } from '../middleware/auth.js';
 import { ah, httpError } from '../utils/asyncHandler.js';
+import { contributionCategories } from '../services/contributionCategories.js';
 
 const router = Router();
 
@@ -55,7 +56,11 @@ router.get('/me', requireAuth, ah(async (req, res) => {
     user: { id: user._id, name: user.name, email: user.email, phone: user.phone },
     memberships: memberships
       .filter((m) => m.group)
-      .map((m) => ({ id: m._id, role: m.role, group: m.group })),
+      .map((m) => {
+        const group = m.group.toObject();
+        group.settings.categories = contributionCategories(group.settings.categories);
+        return { id: m._id, role: m.role, group };
+      }),
   });
 }));
 

@@ -6,6 +6,7 @@ import Membership, { FINANCE_ROLES } from '../models/Membership.js';
 import { requireAuth, loadUser, loadMembership, requireRole } from '../middleware/auth.js';
 import { ah, httpError } from '../utils/asyncHandler.js';
 import { validateWorkbookArchive } from '../services/workbookArchive.js';
+import { contributionCategories } from '../services/contributionCategories.js';
 
 const router = Router({ mergeParams: true });
 router.use(requireAuth, loadUser, loadMembership, requireRole(...FINANCE_ROLES));
@@ -85,7 +86,7 @@ async function validateRows(req, source = 'import') {
     memberIds.add(row.membershipId);
     if (!Number.isSafeInteger(row.amountCents) || row.amountCents < 1) throw httpError(400, 'Every payment needs a positive amount in cents');
     if (typeof row.reportingMonth !== 'string' || !monthFormat.test(row.reportingMonth)) throw httpError(400, 'Every payment needs a reporting month');
-    if (!req.group.settings.categories.includes(row.category)) throw httpError(400, 'Choose a valid group category');
+    if (!contributionCategories(req.group.settings.categories).includes(row.category)) throw httpError(400, 'Choose a valid group category');
     if (row.memo !== undefined && (typeof row.memo !== 'string' || row.memo.length > 200)) throw httpError(400, 'Memo must be at most 200 characters');
     if (source === 'manual' && !METHODS.includes(row.method)) throw httpError(400, 'Choose a valid payment method');
     if (source === 'manual' && row.reference !== undefined && (typeof row.reference !== 'string' || row.reference.length > 200)) {

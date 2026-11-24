@@ -22,7 +22,6 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
   const [memo, setMemo] = useState('');
   const [rows, setRows] = useState(null);
   const [review, setReview] = useState(null);
-  const [approved, setApproved] = useState({});
   const [confirmed, setConfirmed] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [busy, setBusy] = useState('');
@@ -42,7 +41,6 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
   const check = async (payments) => {
     setError('');
     setReview(null);
-    setApproved({});
     setConfirmed(false);
     setBusy('checking');
     try {
@@ -73,14 +71,11 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
   const save = async () => {
     setError('');
     if (!confirmed) return setError('Confirm that you checked the member, months and amounts.');
-    if (rows.some((row) => review.conflicts[row.id].length && !approved[row.id])) {
-      return setError('Confirm each month with an existing payment, or go back and remove it.');
-    }
     setBusy('saving');
     setAttempted(true);
     try {
       const result = await apiWithTimeout(`/groups/${groupId}/imports/monthly/commit`,
-        { method: 'POST', body: { rows, acknowledged: review.conflicts, confirmedDuplicates: Object.keys(approved).filter((id) => approved[id]) } },
+        { method: 'POST', body: { rows, acknowledged: review.conflicts, confirmedDuplicates: rows.filter((row) => review.conflicts[row.id].length).map((row) => row.id) } },
         'The request timed out.');
       setMessage(`Saved ${result.saved} payment(s).${result.alreadySaved ? ` ${result.alreadySaved} previously saved payment(s) were not added again.` : ''}`);
       setRows(null);
@@ -120,13 +115,13 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
           </select>
         </label>
         {member && <>
-          <h3>2. Choose the months and amounts</h3>
-          <p className="small muted">Choose the months paid and enter the amount for each month. Change the year to select months in another year; your selections will stay.</p>
+          <h3>2. Enter the monthly amount and choose months</h3>
+          <p className="small muted">Enter one amount for each selected month. Change the year to choose months in another year; your selections will stay.</p>
           <div className="form-row">
             <label>Year<input type="number" min="1000" max="9999" value={year} onChange={(event) => setYear(event.target.value)} /></label>
             <label>Same amount per month ($)<input type="text" inputMode="decimal" value={amount} onChange={(event) => setAmount(event.target.value)} /></label>
           </div>
-          <p className="small muted">This amount applies automatically to selected months, even if you enter it after choosing them. You can change individual amounts below.</p>
+          <p className="small muted">The same amount applies to every selected month. If a month differs, you can adjust it below.</p>
           {!validYear && <p className="error">Enter a four-digit year to choose months.</p>}
           <div className="actions">
             <button type="button" className="secondary" disabled={!validYear} onClick={() => setSelected((previous) => {
@@ -175,6 +170,7 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
           </details>}
           <h3>3. Payment details</h3>
           <p className="small muted">Use the actual date received. If payments were received on different dates, record them in separate batches.</p>
+          <p className="small muted">Possible duplicate warnings compare payments in the same category. Check other categories in the ledger if needed.</p>
           <div className="form-row">
             <label>Payment date<input type="date" value={date} onChange={(event) => setDate(event.target.value)} /></label>
             <label>Method<select value={method} onChange={(event) => setMethod(event.target.value)}>
@@ -206,13 +202,13 @@ export default function MonthlyPayments({ groupId, members, categories, onSaved 
             {conflicts.length > 0 && <div className="import-help">
               <p>There is already a payment for this member, category and month. Check whether this is an additional payment:</p>
               <ul>{conflicts.map((id) => <li key={id}>{money(review.details[id].amountCents)} received {review.details[id].date}</li>)}</ul>
-              <label className="inline"><input type="checkbox" checked={!!approved[row.id]}
-                onChange={(event) => setApproved({ ...approved, [row.id]: event.target.checked })} /> Save this additional payment anyway</label>
             </div>}
           </div>;
         })}</div>
         {review && <label className="inline"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} />
-          I checked the member, months, amounts and total.
+          {rows.some((row) => review.conflicts[row.id].length)
+            ? 'I checked the member, months, amounts and total, and want to save the additional payments despite the possible matches.'
+            : 'I checked the member, months, amounts and total.'}
         </label>}
         <div className="actions">
           <button type="button" className="secondary" onClick={back}>Back to choices</button>

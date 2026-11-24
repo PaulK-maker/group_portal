@@ -76,6 +76,9 @@ test('exports fresh monthly category details alongside the complete ledger', asy
   const events = await download('Event');
   assert.equal(events.getWorksheet('Monthly report').getCell('H2').value, 'Event payment');
   assert.equal(events.getWorksheet('Monthly report').getCell('E3').value, 0.5);
+  payments.push(payment(2000, 'One-time special contribution', 'cash', 'Special'));
+  const special = await download(encodeURIComponent('One-time special contribution'));
+  assert.equal(special.getWorksheet('Monthly report').getCell('E3').value, 20);
   assert.equal((await fetch(`${url}?category=Unknown`)).status, 400);
 
   payments.push({ ...payment(2500, 'Dues', 'other', 'Imported'), reportingMonth: '2025-01', source: 'import' });

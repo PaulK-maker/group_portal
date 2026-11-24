@@ -4,6 +4,7 @@ import Group from '../models/Group.js';
 import Membership from '../models/Membership.js';
 import { requireAuth, loadUser, loadMembership, requireRole, isFinance } from '../middleware/auth.js';
 import { ah } from '../utils/asyncHandler.js';
+import { contributionCategories } from '../services/contributionCategories.js';
 
 const router = Router();
 router.use(requireAuth, loadUser);
@@ -22,7 +23,8 @@ router.post('/', ah(async (req, res) => {
 router.get('/:groupId', loadMembership, ah(async (req, res) => {
   const query = Group.findById(req.group._id).populate('organization', 'name type');
   if (isFinance(req)) query.select('+inboundToken');
-  const group = await query;
+  const group = (await query).toObject();
+  group.settings.categories = contributionCategories(group.settings.categories);
   res.json({ group, myRole: req.membership.role, myMembershipId: req.membership._id });
 }));
 
@@ -34,7 +36,9 @@ router.patch('/:groupId/settings', loadMembership, requireRole('admin'), ah(asyn
   if (contributionLabel) g.settings.contributionLabel = contributionLabel;
   if (Array.isArray(categories) && categories.length) g.settings.categories = categories.map(String);
   await g.save();
-  res.json({ group: g });
+  const group = g.toObject();
+  group.settings.categories = contributionCategories(group.settings.categories);
+  res.json({ group });
 }));
 
 export default router;

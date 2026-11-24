@@ -119,6 +119,10 @@ test('workbook upload, duplicate confirmation, tenant guard and safe retry after
   const rows = [makeRow(5000), makeRow(1500)];
   assert.equal((await post('/check', { rows: [{ ...rows[0], membershipId: String(new mongoose.Types.ObjectId()) }] })).status, 400);
   assert.equal((await post('/check', { rows: [{ ...rows[0], date: '2026-02-30' }] })).status, 400);
+  for (const category of ['Monthly contribution', 'One-time special contribution']) {
+    assert.equal((await post('/check', { rows: [{ ...rows[0], category }] })).status, 200);
+  }
+  assert.equal((await post('/check', { rows: [{ ...rows[0], category: 'Unknown' }] })).status, 400);
   const response = await post('/check', { rows });
   assert.equal(response.status, 200);
   const review = await response.json();
@@ -179,6 +183,13 @@ test('workbook upload, duplicate confirmation, tenant guard and safe retry after
   assert.deepEqual(duplicateReview.conflicts[extra[0].id], [manualRows[0].id]);
   assert.equal((await post('/monthly/commit', { rows: extra, acknowledged: duplicateReview.conflicts, confirmedDuplicates: [] })).status, 409);
   assert.equal((await post('/monthly/commit', { rows: extra, acknowledged: duplicateReview.conflicts, confirmedDuplicates: [extra[0].id] })).status, 201);
+
+  const monthlyCategory = [{ ...makeRow(2000), category: 'Monthly contribution', method: 'cash', reportingMonth: '2027-01' }];
+  const categoryReview = await (await post('/monthly/check', { rows: monthlyCategory })).json();
+  assert.equal((await post('/monthly/commit', {
+    rows: monthlyCategory, acknowledged: categoryReview.conflicts, confirmedDuplicates: [],
+  })).status, 201);
+  assert.equal(payments.find((payment) => String(payment._id) === monthlyCategory[0].id).category, 'Monthly contribution');
 });
 
 test('only finance can edit imported dates, preserving the reporting month and an audit record', async (t) => {
