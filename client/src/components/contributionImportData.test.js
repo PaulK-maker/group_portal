@@ -133,6 +133,22 @@ test('only interprets ambiguous written dates using the selected format', () => 
   assert.equal(row.reportingMonth, '2025-04');
 });
 
+test('preserves an explicit reporting month independently from payment date and flags invalid months', () => {
+  const rows = makeImportRows({
+    sheet: { rows: [
+      ['Name', 'Amount', 'Date', 'Reporting month'],
+      ['Sam', 50, '2026-11-20', '2025-01'],
+      ['Sam', 20, '2026-11-20', 'bad month'],
+      ['Sam', 10, '2026-11-20', ''],
+    ] },
+    headerRow: 1, layout: 'payments', nameColumn: 0, amountColumn: 1, dateColumn: 2,
+    categoryColumn: '', reportingMonthColumn: 3, columns: [], year: '', defaultDate: '2026-11-20',
+    defaultCategory: 'Dues', categories: ['Dues'], members: [{ id: 'one', name: 'Sam' }], makeId: () => 'id',
+  });
+  assert.deepEqual(rows.map((row) => row.reportingMonth), ['2025-01', 'bad month', '2026-11']);
+  assert.ok(importIssues(rows[1], ['Dues']).includes('Choose a month for the report'));
+});
+
 test('leaves visibly voided ledger payments out but keeps active rows selected', () => {
   const rows = makeImportRows({
     sheet: { rows: [

@@ -46,6 +46,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
   const [dateFormat, setDateFormat] = useState('');
   const [categoryColumn, setCategoryColumn] = useState('');
   const [memoColumn, setMemoColumn] = useState('');
+  const [reportingMonthColumn, setReportingMonthColumn] = useState('');
   const [columns, setColumns] = useState([]);
   const [firstMonthColumn, setFirstMonthColumn] = useState('');
   const [monthCategory, setMonthCategory] = useState(categories.find((category) => category.toLowerCase() === 'dues') || categories[0]);
@@ -89,6 +90,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
     setDateFormat('');
     setCategoryColumn(find(/^category$/i));
     setMemoColumn(find(/^(memo|note|notes|event)$/i));
+    setReportingMonthColumn(find(/^(reporting month|report month)$/i));
     setFirstMonthColumn('');
     setSpecialColumn('');
     setColumns(row.map((value) => {
@@ -173,6 +175,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
       dateColumn: dateColumn === '' ? '' : Number(dateColumn), dateFormat,
       categoryColumn: categoryColumn === '' ? '' : Number(categoryColumn),
       memoColumn: memoColumn === '' ? '' : Number(memoColumn),
+      reportingMonthColumn: reportingMonthColumn === '' ? '' : Number(reportingMonthColumn),
       voidedColumn: layout === 'payments' && voidedIndex >= 0 ? voidedIndex : '',
       columns, year, defaultDate, defaultCategory, categories, members, makeId,
     });
@@ -386,6 +389,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
                 dateColumn !== '' && `date: ${headers[Number(dateColumn)] || `column ${Number(dateColumn) + 1}`}`,
                 categoryColumn !== '' && `category: ${headers[Number(categoryColumn)] || `column ${Number(categoryColumn) + 1}`}`,
                 memoColumn !== '' && `note: ${headers[Number(memoColumn)] || `column ${Number(memoColumn) + 1}`}`,
+                reportingMonthColumn !== '' && `reporting month: ${headers[Number(reportingMonthColumn)] || `column ${Number(reportingMonthColumn) + 1}`}`,
               ].filter(Boolean).join(', ') || 'no date, category or note column'}
             </p>}
             <details className="import-options">
@@ -395,6 +399,7 @@ export default function ContributionImport({ groupId, members, categories, onImp
                   {columnSelect('Payment date column', dateColumn, setDateColumn, true)}
                   {columnSelect('Category column', categoryColumn, setCategoryColumn, true)}
                   {columnSelect('Note or event name column', memoColumn, setMemoColumn, true)}
+                  {columnSelect('Reporting month column (YYYY-MM)', reportingMonthColumn, setReportingMonthColumn, true)}
                 </div> : <div className="stack">
                   <p className="small muted">Choose what each column contains. Leave totals and anything you do not want to import as “Do not import”.</p>
                   {headers.map((header, i) => <div className="import-column" key={i}>

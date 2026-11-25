@@ -70,7 +70,7 @@ export function dateFromCell(value, format = '') {
   return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === iso ? iso : '';
 }
 
-export function makeImportRows({ sheet, headerRow, firstDataRow = headerRow + 1, layout, nameColumn, amountColumn, dateColumn, dateFormat = '', categoryColumn, memoColumn = '', voidedColumn = '', columns, year, defaultDate, defaultCategory, categories, members, makeId }) {
+export function makeImportRows({ sheet, headerRow, firstDataRow = headerRow + 1, layout, nameColumn, amountColumn, dateColumn, dateFormat = '', categoryColumn, memoColumn = '', voidedColumn = '', reportingMonthColumn = '', columns, year, defaultDate, defaultCategory, categories, members, makeId }) {
   const results = [];
   const append = (rowIndex, columnIndex, rawAmount, category, date, reportingMonth, memo, originalDate = '', originalCategory = '', excludedReason = '') => {
     const cents = amountInCents(rawAmount);
@@ -110,7 +110,8 @@ export function makeImportRows({ sheet, headerRow, firstDataRow = headerRow + 1,
       const memo = memoColumn === '' ? '' : String(row[memoColumn] ?? '').trim();
       const voided = voidedColumn === '' ? '' : String(row[voidedColumn] ?? '').trim();
       const excludedReason = /^(true|yes|1|void|voided)(:.*)?$/i.test(voided) ? 'Marked voided in the file' : '';
-      append(r, amountColumn, row[amountColumn], category, sourceDate, sourceDate.slice(0, 7), memo,
+      const sourceMonth = reportingMonthColumn === '' ? '' : String(row[reportingMonthColumn] ?? '').trim();
+      append(r, amountColumn, row[amountColumn], category, sourceDate, sourceMonth || sourceDate.slice(0, 7), memo,
         sourceDate ? '' : String(row[dateColumn] ?? ''), category ? '' : rawCategory, excludedReason);
     }
   }

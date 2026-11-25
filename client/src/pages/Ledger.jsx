@@ -17,6 +17,7 @@ export default function Ledger() {
   const [exportCategory, setExportCategory] = useState(() =>
     categories.includes('Dues') ? 'Dues' : categories[0]
   );
+  const [exportYear, setExportYear] = useState(String(new Date().getFullYear()));
   const blank = { membershipId: '', amount: '', method: 'cashapp', category: categories[0], date: today(), reference: '', memo: '' };
   const [form, setForm] = useState(blank);
   const g = `/groups/${groupId}`;
@@ -64,7 +65,8 @@ export default function Ledger() {
 
   const exportExcel = async () => {
     try {
-      const res = await api(`${g}/export?category=${encodeURIComponent(exportCategory)}`, { raw: true });
+      if (!/^\d{4}$/.test(exportYear) || Number(exportYear) < 1000) throw new Error('Choose a valid four-digit report year.');
+      const res = await api(`${g}/export?category=${encodeURIComponent(exportCategory)}&year=${exportYear}`, { raw: true });
       const blob = await res.blob();
       const name = res.headers.get('Content-Disposition')?.match(/filename="(.+)"/)?.[1] || 'ledger.xlsx';
       const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: name });
@@ -130,6 +132,10 @@ export default function Ledger() {
                   <select value={exportCategory} onChange={(e) => setExportCategory(e.target.value)}>
                     {categories.map((category) => <option key={category} value={category}>{category}</option>)}
                   </select>
+                </label>
+                <label className="inline small">
+                  Report year
+                  <input type="number" min="1000" max="9999" value={exportYear} onChange={(e) => setExportYear(e.target.value)} />
                 </label>
                 <button className="secondary" onClick={exportExcel}>Export to Excel</button>
               </>

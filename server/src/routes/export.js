@@ -23,6 +23,10 @@ router.get('/', ah(async (req, res) => {
   if (typeof category !== 'string' || !categories.includes(category)) {
     return res.status(400).json({ error: 'Choose a valid report category' });
   }
+  const year = req.query.year === undefined ? String(new Date().getFullYear()) : req.query.year;
+  if (typeof year !== 'string' || !/^\d{4}$/.test(year) || Number(year) < 1000) {
+    return res.status(400).json({ error: 'Choose a valid four-digit report year' });
+  }
   const [members, ledger, totals] = await Promise.all([
     Membership.find({ group: req.group._id }).populate('user', 'name email phone'),
     Contribution.find({ group: req.group._id }).sort({ date: 1 }).populate({
@@ -34,6 +38,8 @@ router.get('/', ah(async (req, res) => {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Pamo-Ledger';
   const money = '"$"#,##0.00';
+  const categoryOrder = [category, ...new Set([...categories, ...ledger.map((payment) => payment.category)]
+    .filter((item) => item && item !== category))];
 
   const s = wb.addWorksheet('Summary');
   s.columns = [
@@ -60,6 +66,49 @@ router.get('/', ah(async (req, res) => {
   const totalRow = s.addRow({ name: 'TOTAL', paid: dollars([...totals.values()].reduce((a, t) => a + t.totalCents, 0)) });
   totalRow.font = { bold: true };
   s.getRow(1).font = { bold: true };
+  s.addRow([]);
+  const categoryTitle = s.addRow([`Category totals for ${year} (by reporting month)`]);
+  categoryTitle.font = { bold: true };
+  const categoryHeader = s.addRow(['Category', 'Selected', 'Year total']);
+  categoryHeader.font = { bold: true };
+  for (const reportCategory of categoryOrder) {
+    const categoryTotal = ledger
+      .filter((payment) => !payment.voided && payment.category === reportCategory &&
+        (payment.reportingMonth || payment.date.toISOString().slice(0, 7)).startsWith(`${year}-`))
+      .reduce((sum, payment) => sum + payment.amountCents, 0);
+    s.addRow([reportCategory, reportCategory === category ? 'Selected' : '', dollars(categoryTotal)]);
+  }
+
+  const overview = wb.addWorksheet('Yearly overview');
+  overview.columns = [{ width: 26 }, ...Array.from({ length: 12 }, () => ({ width: 13 })), { width: 15 }];
+  const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  for (const [index, reportCategory] of categoryOrder.entries()) {
+    const heading = overview.addRow([`${index === 0 ? 'SELECTED CATEGORY' : 'OTHER CATEGORY'}: ${reportCategory} — ${year}`]);
+    heading.font = { bold: true };
+    if (index === 0) heading.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFE699' } };
+    const header = overview.addRow(['Member', ...monthNames, 'Year total']);
+    header.font = { bold: true };
+    const byMember = new Map();
+    for (const payment of ledger) {
+      if (payment.voided || payment.category !== reportCategory) continue;
+      const month = payment.reportingMonth || payment.date.toISOString().slice(0, 7);
+      if (!month.startsWith(`${year}-`)) continue;
+      const memberId = String(payment.membership?._id || payment._id);
+      if (!byMember.has(memberId)) byMember.set(memberId, { name: payment.membership?.user?.name || '(Unknown member)', months: Array(12).fill(0) });
+      byMember.get(memberId).months[Number(month.slice(5, 7)) - 1] += payment.amountCents;
+    }
+    const totalsByMonth = Array(12).fill(0);
+    for (const item of [...byMember.values()].sort((a, b) => a.name.localeCompare(b.name))) {
+      item.months.forEach((amount, month) => { totalsByMonth[month] += amount; });
+      const row = overview.addRow([item.name, ...item.months.map(dollars), dollars(item.months.reduce((sum, amount) => sum + amount, 0))]);
+      row.eachCell((cell, column) => { if (column > 1) cell.numFmt = money; });
+    }
+    if (!byMember.size) overview.addRow(['No payments for this category and year']);
+    const total = overview.addRow(['TOTAL', ...totalsByMonth.map(dollars), dollars(totalsByMonth.reduce((sum, amount) => sum + amount, 0))]);
+    total.font = { bold: true };
+    total.eachCell((cell, column) => { if (column > 1) cell.numFmt = money; });
+    overview.addRow([]);
+  }
 
   const l = wb.addWorksheet('Ledger');
   l.columns = [
@@ -72,6 +121,7 @@ router.get('/', ah(async (req, res) => {
     { header: 'Memo', key: 'memo', width: 30 },
     { header: 'Source', key: 'source', width: 9 },
     { header: 'Voided', key: 'voided', width: 22 },
+    { header: 'Reporting month', key: 'reportingMonth', width: 18 },
   ];
   ledger.forEach((c) =>
     l.addRow({
@@ -84,6 +134,7 @@ router.get('/', ah(async (req, res) => {
       memo: c.memo,
       source: c.source,
       voided: c.voided ? `VOID: ${c.voidReason || ''}` : '',
+      reportingMonth: c.reportingMonth || c.date.toISOString().slice(0, 7),
     })
   );
   l.getRow(1).font = { bold: true };
